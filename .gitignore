@@ -1,0 +1,8 @@
+/Debug
+/bin/*.dll
+/bin/*.pdb
+/bin/*.ilk
+/*.user
+/bin/*.exe
+/*.ncb
+/*.suo
