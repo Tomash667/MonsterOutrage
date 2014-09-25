@@ -1,0 +1,3 @@
++ statystyki (hp, atak, obrona)
++ inna jednostka któr¹ mo¿na atakowaæ i umiera
++ inne jednostki AI

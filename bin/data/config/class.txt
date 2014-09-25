@@ -1,0 +1,4 @@
+class "warrior" {
+	name: "Warrior";
+	
+};
