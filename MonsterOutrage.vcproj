@@ -44,6 +44,8 @@
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
+				UsePrecompiledHeader="2"
+				PrecompiledHeaderThrough="Pch.h"
 				WarningLevel="3"
 				DebugInformationFormat="4"
 			/>
@@ -167,8 +169,24 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
+				RelativePath=".\Base.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\Main.cpp"
 				>
+			</File>
+			<File
+				RelativePath=".\Pch.cpp"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="1"
+					/>
+				</FileConfiguration>
 			</File>
 		</Filter>
 		<Filter
@@ -182,6 +200,10 @@
 			</File>
 			<File
 				RelativePath=".\Class.h"
+				>
+			</File>
+			<File
+				RelativePath=".\Pch.h"
 				>
 			</File>
 			<File

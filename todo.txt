@@ -1,1 +1,1 @@
-+ inne jednostki AI
++ different unit (hero, goblin, orc)

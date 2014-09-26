@@ -1,68 +1,5 @@
-#include <SDL.h>
-#include <SDL_image.h>
-#include <SDL_ttf.h>
-#include <cstdio>
-#include <conio.h>
-#include <cstdlib>
-#include <ctime>
-#include <vector>
-#include <algorithm>
-
-using std::vector;
-
-typedef const char* cstring;
-typedef unsigned char byte;
-typedef unsigned int uint;
-
-cstring Format(cstring str, ...)
-{
-	const uint FORMAT_STRINGS = 8;
-	const uint FORMAT_LENGTH = 2048;
-
-	assert(str);
-
-	static char buf[FORMAT_STRINGS][FORMAT_LENGTH];
-	static int marker = 0;
-
-	va_list list;
-	va_start(list,str);
-	_vsnprintf_s((char*)buf[marker],FORMAT_LENGTH,FORMAT_LENGTH-1,str,list);
-	char* cbuf = buf[marker];
-	cbuf[FORMAT_LENGTH-1] = 0;
-
-	marker = (marker+1)%FORMAT_STRINGS;
-
-	return cbuf;
-}
-
-inline byte lerp(byte a, byte b, float t)
-{
-	int ia = (int)a,
-		ib = (int)b;
-	return byte(ia+(ib-ia)*t);
-}
-
-template<typename T>
-inline void RemoveElement(vector<T>& v, const T& e)
-{
-	for(typename vector<T>::iterator it = v.begin(), end = v.end(); it != end; ++it)
-	{
-		if(e == *it)
-		{
-			std::iter_swap(it, end-1);
-			v.pop_back();
-			return;
-		}
-	}
-
-	assert(0 && "Can't find element to remove!");
-}
-
-template<typename T>
-inline void RemoveElement(vector<T>* v, const T& e)
-{
-	RemoveElement(*v, e);
-}
+#include "Pch.h"
+#include "Base.h"
 
 const int VERSION = 0;
 const int MAP_SIZE = 20;
@@ -78,19 +15,6 @@ enum DIR
 	DIR_E,
 	DIR_SE,
 	DIR_INVALID
-};
-
-struct INT2
-{
-	int x, y;
-
-	INT2() {}
-	INT2(int x, int y) : x(x), y(y) {}
-
-	inline INT2 operator + (const INT2& pt) const
-	{
-		return INT2(x+pt.x, y+pt.y);
-	}
 };
 
 INT2 dir_change[] = {
@@ -122,6 +46,14 @@ inline bool KeyDown(int key)
 	return (keystate[key] & IS_DOWN) != 0;
 }
 
+inline int Distance(const INT2& a, const INT2& b)
+{
+	int dist_x = abs(a.x - b.x),
+		dist_y = abs(a.y - b.y);
+	int smal = min(dist_x, dist_y);
+	return smal*15 + (max(dist_x, dist_y)-smal)*10;
+}
+
 SDL_Texture* tTiles, *tUnit, *tText, *tHpBar, *tHit;
 TTF_Font* font;
 SDL_Rect tiles[2];
@@ -133,25 +65,42 @@ struct Unit
 	DIR dir;
 	float move_progress, waiting;
 	bool moving;
+
+	inline INT2 GetPos() const
+	{
+		INT2 pt;
+		if(moving)
+		{
+			pt.x = pos.x*32+int(move_progress*32*dir_change[dir].x);
+			pt.y = pos.y*32+int(move_progress*32*dir_change[dir].y);
+		}
+		else
+		{
+			pt.x = pos.x*32;
+			pt.y = pos.y*32;
+		}
+		return pt;
+	}
 };
 
 struct Tile
 {
 	Unit* unit;
 	bool blocked;
+};
 
-	inline bool IsBlocking() const
-	{
-		return blocked || unit;
-	}
+struct Hit
+{
+	INT2 pos;
+	float timer;
 };
 
 Tile mapa[MAP_SIZE*MAP_SIZE];
 vector<Unit*> units;
+vector<Hit> hits;
 Unit* player;
-INT2 hit_pos;
-float hit_timer;
 
+//=============================================================================
 void InitSDL()
 {
 	printf("INFO: Initializing SLD.");
@@ -177,6 +126,7 @@ void InitSDL()
 		throw Format("ERROR: Failed to initialize SDL_ttf (%d).", TTF_GetError());
 }
 
+//=============================================================================
 void CleanSDL()
 {
 	printf("INFO: Cleaning SDL.");
@@ -189,6 +139,7 @@ void CleanSDL()
 	SDL_Quit();
 }
 
+//=============================================================================
 SDL_Texture* LoadTexture(cstring path)
 {
 	SDL_Surface* s = IMG_Load(path);
@@ -201,6 +152,22 @@ SDL_Texture* LoadTexture(cstring path)
 	return t;
 }
 
+//=============================================================================
+void RenderText()
+{
+	if(tText)
+		SDL_DestroyTexture(tText);
+	SDL_Color color = {0,0,0};
+	SDL_Surface* s = TTF_RenderText_Solid(font, Format("Hp: %d/100 Attack: 30 Defense: 5", player->hp), color);
+	if(!s)
+		throw Format("ERROR: Failed to render text to surfac (%d).", TTF_GetError());
+	tText = SDL_CreateTextureFromSurface(renderer, s);
+	SDL_FreeSurface(s);
+	if(!tText)
+		throw Format("ERROR: Failed to convert text surface to texture (%d).", SDL_GetError());
+}
+
+//=============================================================================
 void LoadMedia()
 {
 	tTiles = LoadTexture("data/textures/tile.png");
@@ -221,17 +188,9 @@ void LoadMedia()
 	font = TTF_OpenFont("data/HighlandGothicFLF.ttf", 16);
 	if(!font)
 		throw Format("ERROR: Failed to load font 'data/HighlandGothicFLF.ttf' (%d).", TTF_GetError());
-
-	SDL_Color color = {0,0,0};
-	SDL_Surface* s = TTF_RenderText_Solid(font, "Hp: 100/100\nAttack: 30\nDefense: 5", color);
-	if(!s)
-		throw Format("ERROR: Failed to render text to surfac (%d).", TTF_GetError());
-	tText = SDL_CreateTextureFromSurface(renderer, s);
-	SDL_FreeSurface(s);
-	if(!tText)
-		throw Format("ERROR: Failed to convert text surface to texture (%d).", SDL_GetError());
 }
 
+//=============================================================================
 void CleanMedia()
 {
 	SDL_DestroyTexture(tTiles);
@@ -242,6 +201,7 @@ void CleanMedia()
 	TTF_CloseFont(font);
 }
 
+//=============================================================================
 void InitGame()
 {
 	srand((uint)time(NULL));
@@ -266,14 +226,18 @@ void InitGame()
 	Tile& tile = mapa[enemy->pos.x+enemy->pos.y*MAP_SIZE];
 	tile.blocked = false;
 	tile.unit = enemy;
+
+	RenderText();
 }
 
+//=============================================================================
 void Draw()
 {
+	// clear render
 	SDL_RenderClear(renderer);
-	SDL_Rect r;
-
+	
 	// tiles
+	SDL_Rect r;
 	r.w = 32;
 	r.h = 32;
 	for(int yy=0; yy<MAP_SIZE; ++yy)
@@ -290,19 +254,12 @@ void Draw()
 	for(vector<Unit*>::iterator it = units.begin(), end = units.end(); it != end; ++it)
 	{
 		Unit& u = **it;
-		if(u.moving)
-		{
-			r.x = u.pos.x*32+int(u.move_progress*32*dir_change[u.dir].x);
-			r.y = u.pos.y*32+int(u.move_progress*32*dir_change[u.dir].y);
-		}
-		else
-		{
-			r.x = u.pos.x*32;
-			r.y = u.pos.y*32;
-		}
+		INT2 pos = u.GetPos();
+		r.x = pos.x;
+		r.y = pos.y;
 		SDL_RenderCopy(renderer, tUnit, NULL, &r);
 		
-		// pasek hp
+		// hp bar
 		if(u.hp != 100)
 		{
 			Uint8 cr, g, b = 0;
@@ -335,59 +292,61 @@ void Draw()
 		}
 	}
 
-	// uderzenie
-	if(hit_timer > 0.f)
+	// attack image
+	for(vector<Hit>::iterator it = hits.begin(), end = hits.end(); it != end; ++it)
 	{
-		r.x = hit_pos.x;
-		r.y = hit_pos.y;
+		r.x = it->pos.x;
+		r.y = it->pos.y;
 		SDL_RenderCopy(renderer, tHit, NULL, &r);
 	}
 	
-	// tekst
+	// text
 	SDL_QueryTexture(tText, NULL, NULL, &r.w, &r.h);
 	r.x = 32*(MAP_SIZE+1);
 	r.y = 32;
 	SDL_RenderCopy(renderer, tText, NULL, &r);
 
+	// display render
 	SDL_RenderPresent(renderer);
 }
 
-bool TryMove(DIR new_dir)
+//=============================================================================
+bool TryMove(Unit& u, DIR new_dir, bool attack)
 {
-	player->new_pos = player->pos + dir_change[new_dir];
-	if(player->new_pos.x >= 0 && player->new_pos.y >= 0 && player->new_pos.x < MAP_SIZE && player->new_pos.y < MAP_SIZE)
+	u.new_pos = u.pos + dir_change[new_dir];
+	if(u.new_pos.x >= 0 && u.new_pos.y >= 0 && u.new_pos.x < MAP_SIZE && u.new_pos.y < MAP_SIZE)
 	{
-		Tile& tile = mapa[player->new_pos.x+player->new_pos.y*MAP_SIZE];
+		Tile& tile = mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE];
 		if(tile.blocked)
 			return false;
 		else if(tile.unit)
 		{
-			// attack
-			hit_pos = INT2(player->new_pos.x*32, player->new_pos.y*32);
-			hit_timer = 0.5f;
-			player->waiting = 1.f;
-			tile.unit->hp -= 25;
-			if(tile.unit->hp <= 0)
+			if(attack)
 			{
-				RemoveElement(units, tile.unit);
-				delete tile.unit;
-				tile.unit = NULL;
+				// attack
+				Hit& hit = Add1(hits);
+				hit.pos = tile.unit->GetPos();
+				hit.timer = 0.5f;
+				u.waiting = 1.f;
+				tile.unit->hp -= 25;
+				return true;
 			}
-			return true;
+			else
+				return false;
 		}
 		else
 		{
 			if(new_dir == DIR_NE || new_dir == DIR_NW || new_dir == DIR_SE || new_dir == DIR_SW)
 			{
-				if(mapa[player->pos.x+dir_change[new_dir].x+player->pos.y*MAP_SIZE].blocked &&
-					mapa[player->pos.x+(player->pos.y+dir_change[new_dir].y)*MAP_SIZE].blocked)
+				if(mapa[u.pos.x+dir_change[new_dir].x+u.pos.y*MAP_SIZE].blocked &&
+					mapa[u.pos.x+(u.pos.y+dir_change[new_dir].y)*MAP_SIZE].blocked)
 					return false;
 			}
 
-			player->dir = new_dir;
-			player->moving = true;
-			player->move_progress = 0.f;
-			mapa[player->new_pos.x+player->new_pos.y*MAP_SIZE].unit = player;
+			u.dir = new_dir;
+			u.moving = true;
+			u.move_progress = 0.f;
+			mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE].unit = &u;
 			return true;
 		}
 	}
@@ -395,22 +354,69 @@ bool TryMove(DIR new_dir)
 	return false;
 }
 
-void Update(float dt)
+//=============================================================================
+int GetClosestPoint(const INT2& my_pos, const Unit& target, INT2& closest)
 {
-	if(player->waiting > 0.f)
-		player->waiting -= dt;
-	else if(player->moving)
+	if(target.moving)
 	{
-		player->move_progress += dt*5;
-		if(player->move_progress >= 1.f)
+		int dist1 = Distance(my_pos, target.pos),
+			dist2 = Distance(my_pos, target.new_pos);
+		if(dist1 >= dist2)
 		{
-			player->moving = false;
-			mapa[player->pos.x+player->pos.y*MAP_SIZE].unit = NULL;
-			player->pos = player->new_pos;
+			closest = target.new_pos;
+			return dist2;
+		}
+		else
+		{
+			closest = target.pos;
+			return dist1;
 		}
 	}
 	else
 	{
+		closest = target.pos;
+		return Distance(my_pos, closest);
+	}
+}
+
+//=============================================================================
+DIR GetDir(const INT2& a, const INT2& b)
+{
+	if(a.x > b.x)
+	{
+		if(a.y > b.y)
+			return DIR_NW;
+		else if(a.y < b.y)
+			return DIR_SW;
+		else
+			return DIR_W;
+	}
+	else if(a.x < b.x)
+	{
+		if(a.y > b.y)
+			return DIR_NE;
+		else if(a.y < b.y)
+			return DIR_SE;
+		else
+			return DIR_E;
+	}
+	else
+	{
+		if(a.y > b.y)
+			return DIR_N;
+		else
+			return DIR_S;
+	}
+}
+
+//=============================================================================
+void Update(float dt)
+{
+	// update player
+	if(player && player->waiting <= 0.f && !player->moving)
+	{
+		Unit& u = *player;
+
 		struct Key1
 		{
 			SDL_Scancode k1;
@@ -441,27 +447,127 @@ void Update(float dt)
 		{
 			if(KeyDown(keys2[i].k1) || (KeyDown(keys2[i].k2) && KeyDown(keys2[i].k3)))
 			{
-				if(TryMove(keys2[i].dir))
+				if(TryMove(u, keys2[i].dir, true))
 					break;
 			}
 		}
-		if(!player->moving && player->waiting <= 0.f)
+		if(!u.moving && u.waiting <= 0.f)
 		{
 			for(int i=0; i<4; ++i)
 			{
 				if(KeyDown(keys1[i].k1) || KeyDown(keys1[i].k2))
 				{
-					if(TryMove(keys1[i].dir))
+					if(TryMove(u, keys1[i].dir, true))
 						break;
 				}
 			}
 		}
 	}
 
-	if(hit_timer > 0.f)
-		hit_timer -= dt;
+	// update ai
+	for(vector<Unit*>::iterator it = units.begin(), end = units.end(); it != end; ++it)
+	{
+		Unit& u = **it;
+		if(u.hp <= 0)
+		{
+			if(&u == player)
+				player = NULL;
+			if(u.moving)
+				mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE].unit = NULL;
+			mapa[u.pos.x+u.pos.y*MAP_SIZE].unit = NULL;
+			delete &u;
+			it = units.erase(it);
+			end = units.end();
+			if(it == end)
+				break;
+		}
+		else if(u.waiting > 0.f)
+			u.waiting -= dt;
+		else if(u.moving)
+		{
+			u.move_progress += dt*5;
+			if(u.move_progress >= 1.f)
+			{
+				u.moving = false;
+				mapa[u.pos.x+u.pos.y*MAP_SIZE].unit = NULL;
+				u.pos = u.new_pos;
+			}
+		}
+		else if(&u != player && player)
+		{
+			INT2 enemy_pt;
+			int dist = GetClosestPoint(u.pos, *player, enemy_pt);
+			if(dist <= 50)
+			{
+				if(dist <= 15)
+				{
+					// in attack range
+					Hit& hit = Add1(hits);
+					hit.pos = player->GetPos();
+					hit.timer = 0.5f;
+					u.waiting = 1.f;
+					player->hp -= 25;
+					RenderText();
+				}
+				else
+				{
+					DIR dir = GetDir(u.pos, enemy_pt);
+					if(!TryMove(u, dir, false))
+					{
+						struct SubDir
+						{
+							DIR a, b;
+						};
+						const SubDir sub_dir[8] = {
+							DIR_SE, DIR_SW, //DIR_S,
+							DIR_W, DIR_S, //DIR_SW,
+							DIR_NW, DIR_NE, //DIR_W,
+							DIR_N, DIR_W, //DIR_NW,
+							DIR_NE, DIR_NW, //DIR_N,
+							DIR_N, DIR_E, //DIR_NE,
+							DIR_SE, DIR_NE, //DIR_E,
+							DIR_S, DIR_E //DIR_SE,
+						};
+						if(rand()%2 == 0)
+						{
+							if(!TryMove(u, sub_dir[dir].a, false))
+								TryMove(u, sub_dir[dir].b, false);
+						}
+						else
+						{
+							if(!TryMove(u, sub_dir[dir].b, false))
+								TryMove(u, sub_dir[dir].a, false);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// update hit animations
+	for(vector<Hit>::iterator it = hits.begin(), end = hits.end(); it != end;)
+	{
+		it->timer -= dt;
+		if(it->timer <= 0.f)
+		{
+			if(it+1 == end)
+			{
+				hits.pop_back();
+				break;
+			}
+			else
+			{
+				std::iter_swap(it, end-1);
+				hits.pop_back();
+				end = hits.end();
+			}
+		}
+		else
+			++it;
+	}
 }
 
+//=============================================================================
 int main(int argc, char *argv[])
 {
 	printf("INFO: Monster Outrage v %d\n", VERSION);
