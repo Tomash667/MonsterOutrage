@@ -1,1 +1,6 @@
-+ different unit (hero, goblin, orc)
++ input to different file
++ gold
++ inn
++ new walkable tile
++ harder enemy
++ experience

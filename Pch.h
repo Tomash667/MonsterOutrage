@@ -9,7 +9,9 @@
 #include <ctime>
 #include <vector>
 #include <algorithm>
+#include <string>
 
+using std::string;
 using std::vector;
 using std::min;
 using std::max;

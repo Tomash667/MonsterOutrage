@@ -4,6 +4,9 @@ typedef const char* cstring;
 typedef unsigned char byte;
 typedef unsigned int uint;
 
+#define IS_SET(flag,bit) (((flag) & (bit)) != 0)
+#define IS_ALL_SET(flag,bits) (((flag) & (bits)) == (bits))
+
 struct INT2
 {
 	int x, y;

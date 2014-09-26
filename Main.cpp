@@ -39,11 +39,25 @@ enum InputState
 
 SDL_Window* window;
 SDL_Renderer* renderer;
+INT2 cursor_pos;
 byte keystate[SDL_NUM_SCANCODES];
+const uint MAX_BUTTON = 8;
+byte mousestate[MAX_BUTTON];
 
 inline bool KeyDown(int key)
 {
-	return (keystate[key] & IS_DOWN) != 0;
+	return IS_SET(keystate[key], IS_DOWN);
+}
+
+inline bool MousePressedRelease(int bt)
+{
+	if(IS_ALL_SET(mousestate[bt], IS_PRESSED))
+	{
+		mousestate[bt] = IS_DOWN;
+		return true;
+	}
+	else
+		return false;
 }
 
 inline int Distance(const INT2& a, const INT2& b)
@@ -54,12 +68,27 @@ inline int Distance(const INT2& a, const INT2& b)
 	return smal*15 + (max(dist_x, dist_y)-smal)*10;
 }
 
-SDL_Texture* tTiles, *tUnit, *tText, *tHpBar, *tHit;
+SDL_Texture* tTiles, *tUnit, *tHpBar, *tHit, *tSelected;
 TTF_Font* font;
 SDL_Rect tiles[2];
 
+struct BaseUnit
+{
+	cstring name;
+	int hp, attack, defense;
+	float move_speed, attack_speed;
+	INT2 offset;
+};
+
+const BaseUnit base_units[] = {
+	"Hero", 100, 40, 5, 5.f, 1.f, INT2(0,0),
+	"Goblin", 50, 12, 0, 6.f, 1.2f, INT2(1,0),
+	"Orc", 75, 20, 5, 5.f, 0.9f, INT2(0,1)
+};
+
 struct Unit
 {
+	const BaseUnit* base;
 	int hp;
 	INT2 pos, new_pos;
 	DIR dir;
@@ -81,6 +110,11 @@ struct Unit
 		}
 		return pt;
 	}
+
+	inline cstring GetText() const
+	{
+		return Format("%s  Hp: %d/%d\nAttack: %d  Defense: %d\nSpeed: %g / %g", base->name, hp, base->hp, base->attack, base->defense, base->move_speed, base->attack_speed);
+	}
 };
 
 struct Tile
@@ -95,10 +129,45 @@ struct Hit
 	float timer;
 };
 
+struct Text
+{
+	string text;
+	SDL_Texture* tex;
+
+	Text() : tex(NULL)
+	{
+
+	}
+
+	void Set(cstring new_text)
+	{
+		if(text == new_text)
+			return;
+		text = new_text;
+		if(tex)
+			SDL_DestroyTexture(tex);
+		SDL_Color color = {0,0,0};
+		SDL_Surface* s = TTF_RenderText_Blended_Wrapped(font, text.c_str(), color, 200);
+		if(!s)
+			throw Format("ERROR: Failed to render TTF text (%d).", TTF_GetError());
+		tex = SDL_CreateTextureFromSurface(renderer, s);
+		SDL_FreeSurface(s);
+		if(!tex)
+			throw Format("ERROR: Failed to convert text surface to texture (%d).", SDL_GetError());
+	}
+
+	void Delete()
+	{
+		if(tex)
+			SDL_DestroyTexture(tex);
+	}
+};
+
 Tile mapa[MAP_SIZE*MAP_SIZE];
 vector<Unit*> units;
 vector<Hit> hits;
-Unit* player;
+Unit* player, *selected;
+Text text[2];
 
 //=============================================================================
 void InitSDL()
@@ -153,27 +222,13 @@ SDL_Texture* LoadTexture(cstring path)
 }
 
 //=============================================================================
-void RenderText()
-{
-	if(tText)
-		SDL_DestroyTexture(tText);
-	SDL_Color color = {0,0,0};
-	SDL_Surface* s = TTF_RenderText_Solid(font, Format("Hp: %d/100 Attack: 30 Defense: 5", player->hp), color);
-	if(!s)
-		throw Format("ERROR: Failed to render text to surfac (%d).", TTF_GetError());
-	tText = SDL_CreateTextureFromSurface(renderer, s);
-	SDL_FreeSurface(s);
-	if(!tText)
-		throw Format("ERROR: Failed to convert text surface to texture (%d).", SDL_GetError());
-}
-
-//=============================================================================
 void LoadMedia()
 {
 	tTiles = LoadTexture("data/textures/tile.png");
 	tUnit = LoadTexture("data/textures/unit.png");
 	tHpBar = LoadTexture("data/textures/hpbar.png");
 	tHit = LoadTexture("data/textures/hit.png");
+	tSelected = LoadTexture("data/textures/selected.png");
 
 	for(int i=0; i<2; ++i)
 	{
@@ -193,11 +248,13 @@ void LoadMedia()
 //=============================================================================
 void CleanMedia()
 {
+	for(int i=0; i<2; ++i)
+		text[i].Delete();
 	SDL_DestroyTexture(tTiles);
 	SDL_DestroyTexture(tUnit);
-	SDL_DestroyTexture(tText);
 	SDL_DestroyTexture(tHpBar);
 	SDL_DestroyTexture(tHit);
+	SDL_DestroyTexture(tSelected);
 	TTF_CloseFont(font);
 }
 
@@ -209,25 +266,41 @@ void InitGame()
 		mapa[i].blocked = (rand()%8 == 0);
 	
 	player = new Unit;
+	player->base = &base_units[0];
 	player->pos = INT2(0,0);
-	player->hp = 100;
+	player->hp = player->base->hp;
 	player->moving = false;
 	player->waiting = 0.f;
 	units.push_back(player);
 	mapa[0].blocked = false;
 	mapa[0].unit = player;
 
-	Unit* enemy = new Unit;
-	enemy->pos = INT2(10+rand()%5,10+rand()%5);
-	enemy->hp = 100;
+	Unit* enemy;
+	
+	for(int i=0; i<3; ++i)
+	{
+		enemy = new Unit;
+		enemy->base = &base_units[1];
+		enemy->pos = INT2(8+rand()%8,8+rand()%8);
+		enemy->hp = enemy->base->hp;
+		enemy->moving = false;
+		enemy->waiting = false;
+		units.push_back(enemy);
+		Tile& tile = mapa[enemy->pos.x+enemy->pos.y*MAP_SIZE];
+		tile.blocked = false;
+		tile.unit = enemy;
+	}
+
+	enemy = new Unit;
+	enemy->base = &base_units[2];
+	enemy->pos = INT2(19,19);
+	enemy->hp = enemy->base->hp;
 	enemy->moving = false;
 	enemy->waiting = false;
 	units.push_back(enemy);
 	Tile& tile = mapa[enemy->pos.x+enemy->pos.y*MAP_SIZE];
 	tile.blocked = false;
 	tile.unit = enemy;
-
-	RenderText();
 }
 
 //=============================================================================
@@ -257,21 +330,27 @@ void Draw()
 		INT2 pos = u.GetPos();
 		r.x = pos.x;
 		r.y = pos.y;
-		SDL_RenderCopy(renderer, tUnit, NULL, &r);
+		SDL_Rect rr;
+		rr.w = 32;
+		rr.h = 32;
+		rr.x = u.base->offset.x*32;
+		rr.y = u.base->offset.y*32;
+		SDL_RenderCopy(renderer, tUnit, &rr, &r);
 		
 		// hp bar
-		if(u.hp != 100)
+		if(u.hp != u.base->hp)
 		{
 			Uint8 cr, g, b = 0;
-			if(u.hp <= 50)
+			float hpp = float(u.hp)/u.base->hp;
+			if(hpp <= 0.5f)
 			{
-				float t = float(u.hp)/50;
+				float t = hpp*2;
 				cr = lerp(255, 255, t);
 				g = lerp(0, 216, t);
 			}
 			else
 			{
-				float t = float(u.hp-50)/50;
+				float t = (hpp-0.5f)*2;
 				cr = lerp(255, 76, t);
 				g = lerp(216, 255, t);
 			}
@@ -299,12 +378,32 @@ void Draw()
 		r.y = it->pos.y;
 		SDL_RenderCopy(renderer, tHit, NULL, &r);
 	}
+
+	// selected unit border
+	if(selected)
+	{
+		INT2 pos = selected->GetPos();
+		r.x = pos.x;
+		r.y = pos.y;
+		SDL_RenderCopy(renderer, tSelected, NULL, &r);
+	}
 	
 	// text
-	SDL_QueryTexture(tText, NULL, NULL, &r.w, &r.h);
+	if(player)
+		text[0].Set(player->GetText());
+	SDL_QueryTexture(text[0].tex, NULL, NULL, &r.w, &r.h);
 	r.x = 32*(MAP_SIZE+1);
 	r.y = 32;
-	SDL_RenderCopy(renderer, tText, NULL, &r);
+	SDL_RenderCopy(renderer, text[0].tex, NULL, &r);
+
+	// selected unit text
+	if(selected)
+	{
+		text[1].Set(selected->GetText());
+		SDL_QueryTexture(text[1].tex, NULL, NULL, &r.w, &r.h);
+		r.y = 232;
+		SDL_RenderCopy(renderer, text[1].tex, NULL, &r);
+	}
 
 	// display render
 	SDL_RenderPresent(renderer);
@@ -327,8 +426,8 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 				Hit& hit = Add1(hits);
 				hit.pos = tile.unit->GetPos();
 				hit.timer = 0.5f;
-				u.waiting = 1.f;
-				tile.unit->hp -= 25;
+				u.waiting = 1.f/u.base->attack_speed;
+				tile.unit->hp -= (u.base->attack - tile.unit->base->defense);
 				return true;
 			}
 			else
@@ -412,6 +511,17 @@ DIR GetDir(const INT2& a, const INT2& b)
 //=============================================================================
 void Update(float dt)
 {
+	// selecting unit
+	if(MousePressedRelease(1))
+	{
+		INT2 tile(cursor_pos.x/32, cursor_pos.y/32);
+		if(tile.x >= 0 && tile.y >= 0 && tile.x < MAP_SIZE && tile.y < MAP_SIZE)
+		{
+			Tile& t = mapa[tile.x+tile.y*MAP_SIZE];
+			selected = t.unit;
+		}
+	}
+
 	// update player
 	if(player && player->waiting <= 0.f && !player->moving)
 	{
@@ -472,6 +582,8 @@ void Update(float dt)
 		{
 			if(&u == player)
 				player = NULL;
+			if(&u == selected)
+				selected = NULL;
 			if(u.moving)
 				mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE].unit = NULL;
 			mapa[u.pos.x+u.pos.y*MAP_SIZE].unit = NULL;
@@ -485,7 +597,7 @@ void Update(float dt)
 			u.waiting -= dt;
 		else if(u.moving)
 		{
-			u.move_progress += dt*5;
+			u.move_progress += dt*u.base->move_speed;
 			if(u.move_progress >= 1.f)
 			{
 				u.moving = false;
@@ -505,9 +617,8 @@ void Update(float dt)
 					Hit& hit = Add1(hits);
 					hit.pos = player->GetPos();
 					hit.timer = 0.5f;
-					u.waiting = 1.f;
-					player->hp -= 25;
-					RenderText();
+					u.waiting = 1.f/u.base->attack_speed;
+					player->hp -= u.base->attack - player->base->defense;
 				}
 				else
 				{
@@ -583,6 +694,7 @@ int main(int argc, char *argv[])
 
 		while(!quit)
 		{
+			// handle events
 			SDL_Event e;
 			while(SDL_PollEvent(&e) != 0)
 			{
@@ -604,8 +716,29 @@ int main(int argc, char *argv[])
 							keystate[e.key.keysym.scancode] = IS_RELEASED;
 					}
 				}
+				else if(e.type == SDL_MOUSEMOTION || e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP)
+				{
+					SDL_GetMouseState(&cursor_pos.x, &cursor_pos.y);
+					if(e.type == SDL_MOUSEBUTTONDOWN)
+					{
+						if(e.button.state == SDL_PRESSED && e.button.button < MAX_BUTTON)
+						{
+							if(mousestate[e.button.button] <= IS_RELEASED)
+								mousestate[e.button.button] = IS_PRESSED;
+						}
+					}
+					else if(e.type == SDL_MOUSEBUTTONUP)
+					{
+						if(e.button.state == SDL_RELEASED && e.button.button < MAX_BUTTON)
+						{
+							if(mousestate[e.button.button] >= IS_DOWN)
+								mousestate[e.button.button] = IS_RELEASED;
+						}
+					}
+				}
 			}
 
+			// calculate dt
 			uint new_ticks = SDL_GetTicks();
 			float dt = float(new_ticks - ticks)/1000.f;
 			ticks = new_ticks;
@@ -613,10 +746,16 @@ int main(int argc, char *argv[])
 			Draw();
 			Update(dt);
 
-			for(uint i = 0; i < SDL_NUM_SCANCODES; ++i)
+			// update input state
+			for(uint i=0; i < SDL_NUM_SCANCODES; ++i)
 			{
 				if(keystate[i] & 1)
 					--keystate[i];
+			}
+			for(uint i=0; i< MAX_BUTTON; ++i)
+			{
+				if(mousestate[i] & 1)
+					--mousestate[i];
 			}
 		}
 
