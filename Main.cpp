@@ -1,9 +1,14 @@
 #include <SDL.h>
 #include <SDL_image.h>
+#include <SDL_ttf.h>
 #include <cstdio>
 #include <conio.h>
 #include <cstdlib>
 #include <ctime>
+#include <vector>
+#include <algorithm>
+
+using std::vector;
 
 typedef const char* cstring;
 typedef unsigned char byte;
@@ -30,8 +35,37 @@ cstring Format(cstring str, ...)
 	return cbuf;
 }
 
+inline byte lerp(byte a, byte b, float t)
+{
+	int ia = (int)a,
+		ib = (int)b;
+	return byte(ia+(ib-ia)*t);
+}
+
+template<typename T>
+inline void RemoveElement(vector<T>& v, const T& e)
+{
+	for(typename vector<T>::iterator it = v.begin(), end = v.end(); it != end; ++it)
+	{
+		if(e == *it)
+		{
+			std::iter_swap(it, end-1);
+			v.pop_back();
+			return;
+		}
+	}
+
+	assert(0 && "Can't find element to remove!");
+}
+
+template<typename T>
+inline void RemoveElement(vector<T>* v, const T& e)
+{
+	RemoveElement(*v, e);
+}
+
 const int VERSION = 0;
-const int MAP_SIZE = 15;
+const int MAP_SIZE = 20;
 
 enum DIR
 {
@@ -88,13 +122,35 @@ inline bool KeyDown(int key)
 	return (keystate[key] & IS_DOWN) != 0;
 }
 
-SDL_Texture* tTiles, *tUnit;
-bool mapa[MAP_SIZE*MAP_SIZE];
+SDL_Texture* tTiles, *tUnit, *tText, *tHpBar, *tHit;
+TTF_Font* font;
 SDL_Rect tiles[2];
-INT2 pos, new_pos;
-DIR dir;
-bool moving;
-float move_progress;
+
+struct Unit
+{
+	int hp;
+	INT2 pos, new_pos;
+	DIR dir;
+	float move_progress, waiting;
+	bool moving;
+};
+
+struct Tile
+{
+	Unit* unit;
+	bool blocked;
+
+	inline bool IsBlocking() const
+	{
+		return blocked || unit;
+	}
+};
+
+Tile mapa[MAP_SIZE*MAP_SIZE];
+vector<Unit*> units;
+Unit* player;
+INT2 hit_pos;
+float hit_timer;
 
 void InitSDL()
 {
@@ -116,6 +172,9 @@ void InitSDL()
 		throw Format("ERROR: Failed to initialize SDL_image (%d).", IMG_GetError());
 
 	SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
+
+	if(TTF_Init() == -1)
+		throw Format("ERROR: Failed to initialize SDL_ttf (%d).", TTF_GetError());
 }
 
 void CleanSDL()
@@ -125,6 +184,7 @@ void CleanSDL()
 	SDL_DestroyRenderer(renderer);
 	SDL_DestroyWindow(window);
 
+	TTF_Quit();
 	IMG_Quit();
 	SDL_Quit();
 }
@@ -145,6 +205,8 @@ void LoadMedia()
 {
 	tTiles = LoadTexture("data/textures/tile.png");
 	tUnit = LoadTexture("data/textures/unit.png");
+	tHpBar = LoadTexture("data/textures/hpbar.png");
+	tHit = LoadTexture("data/textures/hit.png");
 
 	for(int i=0; i<2; ++i)
 	{
@@ -155,20 +217,55 @@ void LoadMedia()
 	tiles[0].y = 0;
 	tiles[1].x = 32;
 	tiles[1].y = 0;
+
+	font = TTF_OpenFont("data/HighlandGothicFLF.ttf", 16);
+	if(!font)
+		throw Format("ERROR: Failed to load font 'data/HighlandGothicFLF.ttf' (%d).", TTF_GetError());
+
+	SDL_Color color = {0,0,0};
+	SDL_Surface* s = TTF_RenderText_Solid(font, "Hp: 100/100\nAttack: 30\nDefense: 5", color);
+	if(!s)
+		throw Format("ERROR: Failed to render text to surfac (%d).", TTF_GetError());
+	tText = SDL_CreateTextureFromSurface(renderer, s);
+	SDL_FreeSurface(s);
+	if(!tText)
+		throw Format("ERROR: Failed to convert text surface to texture (%d).", SDL_GetError());
 }
 
 void CleanMedia()
 {
 	SDL_DestroyTexture(tTiles);
 	SDL_DestroyTexture(tUnit);
+	SDL_DestroyTexture(tText);
+	SDL_DestroyTexture(tHpBar);
+	SDL_DestroyTexture(tHit);
+	TTF_CloseFont(font);
 }
 
 void InitGame()
 {
 	srand((uint)time(NULL));
 	for(int i=0; i<MAP_SIZE*MAP_SIZE; ++i)
-		mapa[i] = (rand()%8 == 0);
-	mapa[0] = false;
+		mapa[i].blocked = (rand()%8 == 0);
+	
+	player = new Unit;
+	player->pos = INT2(0,0);
+	player->hp = 100;
+	player->moving = false;
+	player->waiting = 0.f;
+	units.push_back(player);
+	mapa[0].blocked = false;
+	mapa[0].unit = player;
+
+	Unit* enemy = new Unit;
+	enemy->pos = INT2(10+rand()%5,10+rand()%5);
+	enemy->hp = 100;
+	enemy->moving = false;
+	enemy->waiting = false;
+	units.push_back(enemy);
+	Tile& tile = mapa[enemy->pos.x+enemy->pos.y*MAP_SIZE];
+	tile.blocked = false;
+	tile.unit = enemy;
 }
 
 void Draw()
@@ -185,65 +282,184 @@ void Draw()
 		{
 			r.x = xx*32;
 			r.y = yy*32;
-			SDL_RenderCopy(renderer, tTiles, &tiles[mapa[xx+yy*MAP_SIZE] ? 1 : 0], &r);
+			SDL_RenderCopy(renderer, tTiles, &tiles[mapa[xx+yy*MAP_SIZE].blocked ? 1 : 0], &r);
 		}
 	}
 	
 	// unit
-	if(moving)
+	for(vector<Unit*>::iterator it = units.begin(), end = units.end(); it != end; ++it)
 	{
-		r.x = pos.x*32+int(move_progress*32*dir_change[dir].x);
-		r.y = pos.y*32+int(move_progress*32*dir_change[dir].y);
+		Unit& u = **it;
+		if(u.moving)
+		{
+			r.x = u.pos.x*32+int(u.move_progress*32*dir_change[u.dir].x);
+			r.y = u.pos.y*32+int(u.move_progress*32*dir_change[u.dir].y);
+		}
+		else
+		{
+			r.x = u.pos.x*32;
+			r.y = u.pos.y*32;
+		}
+		SDL_RenderCopy(renderer, tUnit, NULL, &r);
+		
+		// pasek hp
+		if(u.hp != 100)
+		{
+			Uint8 cr, g, b = 0;
+			if(u.hp <= 50)
+			{
+				float t = float(u.hp)/50;
+				cr = lerp(255, 255, t);
+				g = lerp(0, 216, t);
+			}
+			else
+			{
+				float t = float(u.hp-50)/50;
+				cr = lerp(255, 76, t);
+				g = lerp(216, 255, t);
+			}
+			SDL_SetTextureColorMod(tHpBar, cr, g, b);
+			SDL_Rect r2;
+			r2.w = int(float(u.hp)/100*32);
+			if(r2.w <= 0)
+				r2.w = 1;
+			r2.h = 2;
+			r2.x = 0;
+			r2.y = 0;
+			SDL_Rect r3;
+			r3.w = r2.w;
+			r3.h = r2.h;
+			r3.x = r.x;
+			r3.y = r.y;
+			SDL_RenderCopy(renderer, tHpBar, &r2, &r3);
+		}
 	}
-	else
+
+	// uderzenie
+	if(hit_timer > 0.f)
 	{
-		r.x = pos.x*32;
-		r.y = pos.y*32;
+		r.x = hit_pos.x;
+		r.y = hit_pos.y;
+		SDL_RenderCopy(renderer, tHit, NULL, &r);
 	}
-	SDL_RenderCopy(renderer, tUnit, NULL, &r);
+	
+	// tekst
+	SDL_QueryTexture(tText, NULL, NULL, &r.w, &r.h);
+	r.x = 32*(MAP_SIZE+1);
+	r.y = 32;
+	SDL_RenderCopy(renderer, tText, NULL, &r);
 
 	SDL_RenderPresent(renderer);
 }
 
+bool TryMove(DIR new_dir)
+{
+	player->new_pos = player->pos + dir_change[new_dir];
+	if(player->new_pos.x >= 0 && player->new_pos.y >= 0 && player->new_pos.x < MAP_SIZE && player->new_pos.y < MAP_SIZE)
+	{
+		Tile& tile = mapa[player->new_pos.x+player->new_pos.y*MAP_SIZE];
+		if(tile.blocked)
+			return false;
+		else if(tile.unit)
+		{
+			// attack
+			hit_pos = INT2(player->new_pos.x*32, player->new_pos.y*32);
+			hit_timer = 0.5f;
+			player->waiting = 1.f;
+			tile.unit->hp -= 25;
+			if(tile.unit->hp <= 0)
+			{
+				RemoveElement(units, tile.unit);
+				delete tile.unit;
+				tile.unit = NULL;
+			}
+			return true;
+		}
+		else
+		{
+			if(new_dir == DIR_NE || new_dir == DIR_NW || new_dir == DIR_SE || new_dir == DIR_SW)
+			{
+				if(mapa[player->pos.x+dir_change[new_dir].x+player->pos.y*MAP_SIZE].blocked &&
+					mapa[player->pos.x+(player->pos.y+dir_change[new_dir].y)*MAP_SIZE].blocked)
+					return false;
+			}
+
+			player->dir = new_dir;
+			player->moving = true;
+			player->move_progress = 0.f;
+			mapa[player->new_pos.x+player->new_pos.y*MAP_SIZE].unit = player;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void Update(float dt)
 {
-	if(moving)
+	if(player->waiting > 0.f)
+		player->waiting -= dt;
+	else if(player->moving)
 	{
-		move_progress += dt*5;
-		if(move_progress >= 1.f)
+		player->move_progress += dt*5;
+		if(player->move_progress >= 1.f)
 		{
-			moving = false;
-			pos = new_pos;
+			player->moving = false;
+			mapa[player->pos.x+player->pos.y*MAP_SIZE].unit = NULL;
+			player->pos = player->new_pos;
 		}
 	}
 	else
 	{
-		DIR new_dir = DIR_INVALID;
-		if((KeyDown(SDL_SCANCODE_LEFT) || KeyDown(SDL_SCANCODE_KP_4)) && pos.x > 0 && !mapa[pos.x-1+pos.y*MAP_SIZE])
-			new_dir = DIR_W;
-		else if((KeyDown(SDL_SCANCODE_RIGHT) || KeyDown(SDL_SCANCODE_KP_6)) && pos.x < MAP_SIZE-1 && !mapa[pos.x+1+pos.y*MAP_SIZE])
-			new_dir = DIR_E;
-		else if((KeyDown(SDL_SCANCODE_UP) || KeyDown(SDL_SCANCODE_KP_8)) && pos.y > 0 && !mapa[pos.x+(pos.y-1)*MAP_SIZE])
-			new_dir = DIR_N;
-		else if((KeyDown(SDL_SCANCODE_DOWN) || KeyDown(SDL_SCANCODE_KP_2)) && pos.y < MAP_SIZE-1 && !mapa[pos.x+(pos.y+1)*MAP_SIZE])
-			new_dir = DIR_S;
-		else if(KeyDown(SDL_SCANCODE_KP_1) && pos.x > 0 && pos.y < MAP_SIZE-1 && !mapa[pos.x-1+(pos.y+1)*MAP_SIZE])
-			new_dir = DIR_SW;
-		else if(KeyDown(SDL_SCANCODE_KP_3) && pos.x < MAP_SIZE-1 && pos.y < MAP_SIZE-1 && !mapa[pos.x+1+(pos.y+1)*MAP_SIZE])
-			new_dir = DIR_SE;
-		else if(KeyDown(SDL_SCANCODE_KP_7) && pos.x > 0 && pos.y > 0 && !mapa[pos.x-1+(pos.y-1)*MAP_SIZE])
-			new_dir = DIR_NW;
-		else if(KeyDown(SDL_SCANCODE_KP_9) && pos.x < MAP_SIZE-1 && pos.y > 0 && !mapa[pos.x+1+(pos.y-1)*MAP_SIZE])
-			new_dir = DIR_NE;
-
-		if(new_dir != DIR_INVALID)
+		struct Key1
 		{
-			dir = new_dir;
-			moving = true;
-			move_progress = 0.f;
-			new_pos = pos + dir_change[dir];
+			SDL_Scancode k1;
+			SDL_Scancode k2;
+			DIR dir;
+		};
+		const Key1 keys1[] = {
+			SDL_SCANCODE_LEFT, SDL_SCANCODE_KP_4, DIR_W,
+			SDL_SCANCODE_RIGHT, SDL_SCANCODE_KP_6, DIR_E,
+			SDL_SCANCODE_UP, SDL_SCANCODE_KP_8, DIR_N,
+			SDL_SCANCODE_DOWN, SDL_SCANCODE_KP_2, DIR_S
+		};
+		struct Key2
+		{
+			SDL_Scancode k1;
+			SDL_Scancode k2;
+			SDL_Scancode k3;
+			DIR dir;
+		};
+		const Key2 keys2[] = {
+			SDL_SCANCODE_KP_1, SDL_SCANCODE_LEFT, SDL_SCANCODE_DOWN, DIR_SW,
+			SDL_SCANCODE_KP_3, SDL_SCANCODE_RIGHT, SDL_SCANCODE_DOWN, DIR_SE,
+			SDL_SCANCODE_KP_7, SDL_SCANCODE_LEFT, SDL_SCANCODE_UP, DIR_NW,
+			SDL_SCANCODE_KP_9, SDL_SCANCODE_RIGHT, SDL_SCANCODE_UP, DIR_NE
+		};
+
+		for(int i=0; i<4; ++i)
+		{
+			if(KeyDown(keys2[i].k1) || (KeyDown(keys2[i].k2) && KeyDown(keys2[i].k3)))
+			{
+				if(TryMove(keys2[i].dir))
+					break;
+			}
+		}
+		if(!player->moving && player->waiting <= 0.f)
+		{
+			for(int i=0; i<4; ++i)
+			{
+				if(KeyDown(keys1[i].k1) || KeyDown(keys1[i].k2))
+				{
+					if(TryMove(keys1[i].dir))
+						break;
+				}
+			}
 		}
 	}
+
+	if(hit_timer > 0.f)
+		hit_timer -= dt;
 }
 
 int main(int argc, char *argv[])

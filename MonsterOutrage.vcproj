@@ -40,7 +40,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="&quot;F:\lib\SDL2-2.0.3\include&quot;;&quot;F:\lib\SDL2_image-2.0.0\include&quot;"
+				AdditionalIncludeDirectories="&quot;F:\lib\SDL2-2.0.3\include&quot;;&quot;F:\lib\SDL2_image-2.0.0\include&quot;;&quot;F:\lib\SDL2_ttf-2.0.12\include&quot;"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
@@ -58,9 +58,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="SDL2.lib SDL2main.lib SDL2_image.lib"
+				AdditionalDependencies="SDL2.lib SDL2main.lib SDL2_image.lib SDL2_ttf.lib"
 				OutputFile="$(ProjectDir)bin\$(ProjectName).exe"
-				AdditionalLibraryDirectories="&quot;F:\lib\SDL2-2.0.3\lib\x86&quot;;&quot;F:\lib\SDL2_image-2.0.0\lib\x86&quot;"
+				AdditionalLibraryDirectories="&quot;F:\lib\SDL2-2.0.3\lib\x86&quot;;&quot;F:\lib\SDL2_image-2.0.0\lib\x86&quot;;&quot;F:\lib\SDL2_ttf-2.0.12\lib\x86&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				TargetMachine="1"
@@ -194,6 +194,10 @@
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
+			<File
+				RelativePath=".\todo.txt"
+				>
+			</File>
 		</Filter>
 	</Files>
 	<Globals>
