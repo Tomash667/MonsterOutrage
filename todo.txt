@@ -1,10 +1,7 @@
 + harder enemy
-+ experience
-+ move after 0.5 after attacking, attack after normal attack speed
-+ hit attached to unit
 + scrolling map
 
-NEXT VERSION:
+NEXT VERSION [v1]:
 + pathfinding
 + hit chance
 + friendly guards
@@ -13,9 +10,24 @@ NEXT VERSION:
 + can exit building with move keys
 + text about healing
 + healing depends on max hp
++ exp for attacking
++ more realistic map
 
-NEXT VERSION:
+NEXT VERSION [v2]:
 + blacksmith [upgrade armor, upgrade weapon]
++ castle [spawn guards]
++ enemy spawn building
+
+NEXT VERSION [v3]:
++ building damage, repair
++ warriors guild
++ other warriors
++ sharing gold reward, experience
++ workers
+
+NEXT VERSION: [v4]
++ ranged combat
++ guard tower
 
 IDEAS:
 + disease (decrase natural healing, slow)

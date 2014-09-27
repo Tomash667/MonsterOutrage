@@ -59,16 +59,17 @@ INT2 wall_offset(0,0), door_offset(1,0);
 struct BaseUnit
 {
 	cstring name;
-	int hp, attack, defense;
+	int lvl, hp, attack, defense;
 	float move_speed, attack_speed;
 	INT2 offset, gold;
 };
 
-const BaseUnit base_units[] = {
-	"Hero", 100, 40, 5, 5.f, 1.f, INT2(0,0), INT2(0,0),
-	"Goblin", 50, 12, 0, 6.f, 1.2f, INT2(1,0), INT2(10,20),
-	"Orc", 75, 20, 5, 5.f, 0.9f, INT2(0,1), INT2(25,50),
-	"Minotaur", 150, 50, 10, 4.f, 0.95f, INT2(1,1), INT2(65,80)
+// this should be const but temporary we edit hero stats upon level up
+/*const*/ BaseUnit base_units[] = {
+	"Hero", 1, 100, 40, 5, 5.f, 1.f, INT2(0,0), INT2(0,0),
+	"Goblin", 1, 50, 12, 0, 6.f, 1.2f, INT2(1,0), INT2(10,20),
+	"Orc", 2, 75, 20, 5, 5.f, 0.9f, INT2(0,1), INT2(25,50),
+	"Minotaur", 4, 150, 50, 10, 4.f, 0.95f, INT2(1,1), INT2(65,80)
 };
 
 struct BaseBuilding
@@ -81,18 +82,119 @@ const BaseBuilding base_buildings[] = {
 	"Inn", INT2(0,1)
 };
 
+struct Unit;
+
+struct UnitRef
+{
+	Unit* unit;
+	uint refs;
+
+	UnitRef() : unit(NULL), refs(0)
+	{
+
+	}
+
+	inline Unit& GetRef()
+	{
+		assert(unit);
+		return *unit;
+	}
+};
+
+struct UnitRefTable
+{
+	uint last_index;
+	vector<uint> empty_ids;
+	vector<UnitRef> refs;
+
+	inline void Init()
+	{
+		last_index = 0;
+		refs.resize(64);
+	}
+
+	inline UnitRef* Add(Unit* u)
+	{
+		assert(u);
+		UnitRef* _ref;
+		if(!empty_ids.empty())
+		{
+			uint id = empty_ids.back();
+			empty_ids.pop_back();
+			_ref = &refs[id];
+		}
+		else
+		{
+			if(last_index >= 64u)
+				throw "ERROR: No space in UnitRefTable!";
+			_ref = &refs[last_index];
+			++last_index;
+		}
+		_ref->unit = u;
+		_ref->refs = 1;
+		return _ref;
+	}
+
+	inline void Remove(UnitRef* _ref)
+	{
+		assert(_ref);
+		--_ref->refs;
+		assert(_ref->refs > 0 || !_ref->unit);
+		if(_ref->refs == 0)
+			empty_ids.push_back(GetIndex(_ref));
+	}
+
+	inline void Delete(UnitRef* _ref)
+	{
+		assert(_ref);
+		_ref->unit = NULL;
+		--_ref->refs;
+		if(_ref->refs == 0)
+			empty_ids.push_back(GetIndex(_ref));
+	}
+
+	inline uint GetIndex(UnitRef* _ref)
+	{
+		assert(_ref);
+		int index = _ref - &refs[0];
+		assert(index >= 0 && index < (int)last_index && &refs[index] == _ref);
+		return (uint)index;
+	}
+
+} RefTable;
+
+inline bool CheckRef(UnitRef*& _ref)
+{
+	if(!_ref)
+		return false;
+	else if(_ref->unit)
+		return true;
+	else
+	{
+		RefTable.Remove(_ref);
+		_ref = NULL;
+		return false;
+	}
+}
+
 struct Unit
 {
-	const BaseUnit* base;
+	/*const*/ BaseUnit* base;
+	UnitRef* _ref;
 	int hp, gold;
 	INT2 pos, new_pos;
 	DIR dir;
-	float move_progress, waiting;
+	float move_progress, waiting, attack_timer;
 	bool moving, alive, is_player, inside_building;
 
-	Unit(const BaseUnit* base) : moving(false), waiting(0.f), alive(true), is_player(false), base(base), hp(base->hp), gold(random(base->gold)), inside_building(false)
+	Unit(/*const*/ BaseUnit* base) : moving(false), waiting(0.f), alive(true), is_player(false), base(base), hp(base->hp), gold(random(base->gold)), inside_building(false), attack_timer(0.f)
 	{
+		_ref = RefTable.Add(this);
+	}
 
+	virtual ~Unit()
+	{
+		RefTable.Delete(_ref);
 	}
 
 	inline INT2 GetPos() const
@@ -134,6 +236,49 @@ struct Player : public Unit
 		return Format("%s  Hp: %d/%d\nLvl: %d   Exp: %d/%d\nAttack: %d  Defense: %d\nSpeed: %g / %g\nGold: %d (%d)", base->name, hp, base->hp, lvl, exp, need_exp, base->attack, base->defense,
 			base->move_speed, base->attack_speed, gold, untaxed_gold);
 	}
+
+	inline void AddExp(int exp_lvl)
+	{
+		if(exp_lvl > lvl)
+			exp_lvl += (exp_lvl-lvl);
+		else if(exp_lvl < lvl)
+			exp_lvl -= (lvl-exp_lvl);
+		if(exp_lvl > 0)
+			exp += exp_lvl*50;
+		else
+		{
+			switch(exp_lvl)
+			{
+			case 0:
+				exp += 25;
+				break;
+			case -1:
+				exp += 12;
+				break;
+			case -2:
+				exp += 6;
+				break;
+			case -3:
+				exp += 3;
+				break;
+			case -4:
+				++exp;
+				break;
+			default:
+				return;
+			}
+		}
+		while(exp >= need_exp)
+		{
+			exp -= need_exp;
+			need_exp += 100;
+			base->hp += 10;
+			hp += 10;
+			base->attack += 4;
+			++base->defense;
+			++lvl;
+		}
+	}
 };
 
 struct Building
@@ -150,7 +295,7 @@ enum BuildingTile
 
 struct Tile
 {
-	Unit* unit;
+	UnitRef* unit;
 	int type;
 	struct 
 	{
@@ -182,6 +327,7 @@ struct Hit
 {
 	INT2 pos;
 	float timer;
+	UnitRef* _ref;
 };
 
 struct Text
@@ -223,7 +369,7 @@ Tile mapa[MAP_SIZE*MAP_SIZE];
 vector<Unit*> units;
 vector<Hit> hits;
 Player* player;
-Unit* selected;
+UnitRef* selected;
 Text text[4];
 Building* inn;
 
@@ -313,6 +459,8 @@ void CleanMedia()
 //=============================================================================
 void InitGame()
 {
+	RefTable.Init();
+
 	srand((uint)time(NULL));
 	for(int i=0; i<MAP_SIZE*MAP_SIZE; ++i)
 	{
@@ -332,7 +480,7 @@ void InitGame()
 	player->pos = INT2(0,0);
 	units.push_back(player);
 	mapa[0].type = 0;
-	mapa[0].unit = player;
+	mapa[0].unit = player->_ref;
 
 	Unit* enemy;
 	
@@ -343,7 +491,7 @@ void InitGame()
 		units.push_back(enemy);
 		Tile& tile = mapa[enemy->pos.x+enemy->pos.y*MAP_SIZE];
 		tile.type = 0;
-		tile.unit = enemy;
+		tile.unit = enemy->_ref;
 	}
 
 	enemy = new Unit(&base_units[2]);
@@ -351,7 +499,7 @@ void InitGame()
 	units.push_back(enemy);
 	Tile& tile = mapa[enemy->pos.x+enemy->pos.y*MAP_SIZE];
 	tile.type = 0;
-	tile.unit = enemy;
+	tile.unit = enemy->_ref;
 
 #define M(x,y) mapa[(x)+(y)*MAP_SIZE]
 
@@ -484,9 +632,9 @@ void Draw()
 	}
 
 	// selected unit border
-	if(selected)
+	if(CheckRef(selected))
 	{
-		INT2 pos = selected->GetPos();
+		INT2 pos = selected->GetRef().GetPos();
 		r.x = pos.x;
 		r.y = pos.y;
 		SDL_RenderCopy(renderer, tSelected, NULL, &r);
@@ -501,9 +649,9 @@ void Draw()
 	SDL_RenderCopy(renderer, text[0].tex, NULL, &r);
 
 	// selected unit text
-	if(selected)
+	if(CheckRef(selected))
 	{
-		text[1].Set(selected->GetText());
+		text[1].Set(selected->GetRef().GetText());
 		SDL_QueryTexture(text[1].tex, NULL, NULL, &r.w, &r.h);
 		r.y = 232;
 		SDL_RenderCopy(renderer, text[1].tex, NULL, &r);
@@ -562,18 +710,25 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 			return false;
 		else if(tile.unit)
 		{
-			if(attack && tile.unit->alive)
+			if(CheckRef(tile.unit) && attack && tile.unit->GetRef().alive)
 			{
 				// attack
-				Hit& hit = Add1(hits);
-				hit.pos = tile.unit->GetPos();
-				hit.timer = 0.5f;
-				u.waiting = 1.f/u.base->attack_speed;
-				tile.unit->hp -= (u.base->attack - tile.unit->base->defense);
-				if(tile.unit->hp <= 0)
+				if(u.attack_timer <= 0.f)
 				{
-					tile.unit->alive = false;
-					player->untaxed_gold += tile.unit->gold;
+					Unit& target = tile.unit->GetRef();
+					Hit& hit = Add1(hits);
+					hit.pos = target.GetPos();
+					hit.timer = 0.5f;
+					hit._ref = tile.unit;
+					u.waiting = 0.5f;
+					u.attack_timer = 1.f/u.base->attack_speed;
+					target.hp -= (u.base->attack - target.base->defense);
+					if(target.hp <= 0)
+					{
+						target.alive = false;
+						player->untaxed_gold += target.gold;
+						player->AddExp(target.base->lvl);
+					}
 				}
 				return true;
 			}
@@ -592,7 +747,7 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 			u.dir = new_dir;
 			u.moving = true;
 			u.move_progress = 0.f;
-			mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE].unit = &u;
+			mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE].unit = u._ref;
 			return true;
 		}
 	}
@@ -782,12 +937,11 @@ void Update(float dt)
 	for(vector<Unit*>::iterator it = units.begin(), end = units.end(); it != end; ++it)
 	{
 		Unit& u = **it;
+		u.attack_timer -= dt;
 		if(u.hp <= 0)
 		{
 			if(&u == player)
 				player = NULL;
-			if(&u == selected)
-				selected = NULL;
 			if(u.moving)
 				mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE].unit = NULL;
 			mapa[u.pos.x+u.pos.y*MAP_SIZE].unit = NULL;
@@ -831,15 +985,22 @@ void Update(float dt)
 				if(dist <= 15)
 				{
 					// in attack range
-					Hit& hit = Add1(hits);
-					hit.pos = player->GetPos();
-					hit.timer = 0.5f;
-					u.waiting = 1.f/u.base->attack_speed;
-					player->hp -= u.base->attack - player->base->defense;
-					if(player->hp <= 0)
+					if(u.attack_timer <= 0.f)
 					{
-						player->alive = false;
-						u.gold += (player->gold + player->untaxed_gold);
+						Hit& hit = Add1(hits);
+						hit.pos = player->GetPos();
+						hit.timer = 0.5f;
+						hit._ref = player->_ref;
+						u.waiting = 0.5f;
+						u.attack_timer = 1.f/u.base->attack_speed;
+						player->hp -= u.base->attack - player->base->defense;
+						if(player->hp <= 0)
+						{
+							player->alive = false;
+							u.gold += (player->gold + player->untaxed_gold);
+							player->gold = 0;
+							player->untaxed_gold = 0;
+						}
 					}
 				}
 				else
@@ -880,8 +1041,9 @@ void Update(float dt)
 	// update hit animations
 	for(vector<Hit>::iterator it = hits.begin(), end = hits.end(); it != end;)
 	{
-		it->timer -= dt;
-		if(it->timer <= 0.f)
+		Hit& hit = *it;
+		hit.timer -= dt;
+		if(hit.timer <= 0.f)
 		{
 			if(it+1 == end)
 			{
@@ -896,7 +1058,11 @@ void Update(float dt)
 			}
 		}
 		else
+		{
+			if(CheckRef(hit._ref))
+				hit.pos = hit._ref->GetRef().GetPos();
 			++it;
+		}
 	}
 }
 
