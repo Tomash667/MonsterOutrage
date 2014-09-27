@@ -173,6 +173,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\Input.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\Main.cpp"
 				>
 			</File>
@@ -203,6 +207,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\Input.h"
+				>
+			</File>
+			<File
 				RelativePath=".\Pch.h"
 				>
 			</File>
@@ -216,6 +224,10 @@
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
+			<File
+				RelativePath=".\readme.txt"
+				>
+			</File>
 			<File
 				RelativePath=".\todo.txt"
 				>

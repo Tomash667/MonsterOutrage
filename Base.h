@@ -52,6 +52,14 @@ inline void RemoveElement(vector<T>* v, const T& e)
 }
 
 template<typename T>
+inline void DeleteElements(vector<T>& v)
+{
+	for(typename vector<T>::iterator it = v.begin(), end = v.end(); it != end; ++it)
+		delete *it;
+	v.clear();
+}
+
+template<typename T>
 inline T& Add1(vector<T>& v)
 {
 	v.resize(v.size()+1);
@@ -63,4 +71,16 @@ inline T& Add1(vector<T>* v)
 {
 	v->resize(v->size()+1);
 	return v->back();
+}
+
+inline int random(int a, int b)
+{
+	return rand()%(b-a+1)+a;
+}
+
+inline int random(const INT2& a)
+{
+	if(a.x == a.y)
+		return a.x;
+	return random(a.x, a.y);
 }

@@ -1,6 +1,22 @@
-+ input to different file
-+ gold
-+ inn
-+ new walkable tile
 + harder enemy
 + experience
++ move after 0.5 after attacking, attack after normal attack speed
++ hit attached to unit
++ scrolling map
+
+NEXT VERSION:
++ pathfinding
++ hit chance
++ friendly guards
++ marketplace [potion]
++ selectable buildings with description
++ can exit building with move keys
++ text about healing
++ healing depends on max hp
+
+NEXT VERSION:
++ blacksmith [upgrade armor, upgrade weapon]
+
+IDEAS:
++ disease (decrase natural healing, slow)
++ poison

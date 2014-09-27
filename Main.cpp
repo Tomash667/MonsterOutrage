@@ -1,8 +1,9 @@
 #include "Pch.h"
-#include "Base.h"
+#include "Input.h"
 
 const int VERSION = 0;
 const int MAP_SIZE = 20;
+const int TAX = 10;
 
 enum DIR
 {
@@ -29,36 +30,8 @@ INT2 dir_change[] = {
 	INT2(0,0)
 };
 
-enum InputState
-{
-	IS_UP,			// 00
-	IS_RELEASED,	// 01
-	IS_DOWN,		// 10
-	IS_PRESSED		// 11
-};
-
 SDL_Window* window;
 SDL_Renderer* renderer;
-INT2 cursor_pos;
-byte keystate[SDL_NUM_SCANCODES];
-const uint MAX_BUTTON = 8;
-byte mousestate[MAX_BUTTON];
-
-inline bool KeyDown(int key)
-{
-	return IS_SET(keystate[key], IS_DOWN);
-}
-
-inline bool MousePressedRelease(int bt)
-{
-	if(IS_ALL_SET(mousestate[bt], IS_PRESSED))
-	{
-		mousestate[bt] = IS_DOWN;
-		return true;
-	}
-	else
-		return false;
-}
 
 inline int Distance(const INT2& a, const INT2& b)
 {
@@ -68,32 +41,59 @@ inline int Distance(const INT2& a, const INT2& b)
 	return smal*15 + (max(dist_x, dist_y)-smal)*10;
 }
 
-SDL_Texture* tTiles, *tUnit, *tHpBar, *tHit, *tSelected;
+struct TileType
+{
+	SDL_Rect rect;
+	bool block;
+};
+
+SDL_Texture* tTiles, *tUnit, *tHpBar, *tHit, *tSelected, *tBuilding, *tButton;
 TTF_Font* font;
-SDL_Rect tiles[2];
+TileType tiles[3] = {
+	0, 0, 32, 32, false,
+	32, 0, 32, 32, true,
+	0, 32, 32, 32, false
+};
+INT2 wall_offset(0,0), door_offset(1,0);
 
 struct BaseUnit
 {
 	cstring name;
 	int hp, attack, defense;
 	float move_speed, attack_speed;
-	INT2 offset;
+	INT2 offset, gold;
 };
 
 const BaseUnit base_units[] = {
-	"Hero", 100, 40, 5, 5.f, 1.f, INT2(0,0),
-	"Goblin", 50, 12, 0, 6.f, 1.2f, INT2(1,0),
-	"Orc", 75, 20, 5, 5.f, 0.9f, INT2(0,1)
+	"Hero", 100, 40, 5, 5.f, 1.f, INT2(0,0), INT2(0,0),
+	"Goblin", 50, 12, 0, 6.f, 1.2f, INT2(1,0), INT2(10,20),
+	"Orc", 75, 20, 5, 5.f, 0.9f, INT2(0,1), INT2(25,50),
+	"Minotaur", 150, 50, 10, 4.f, 0.95f, INT2(1,1), INT2(65,80)
+};
+
+struct BaseBuilding
+{
+	cstring name;
+	INT2 offset;
+};
+
+const BaseBuilding base_buildings[] = {
+	"Inn", INT2(0,1)
 };
 
 struct Unit
 {
 	const BaseUnit* base;
-	int hp;
+	int hp, gold;
 	INT2 pos, new_pos;
 	DIR dir;
 	float move_progress, waiting;
-	bool moving;
+	bool moving, alive, is_player, inside_building;
+
+	Unit(const BaseUnit* base) : moving(false), waiting(0.f), alive(true), is_player(false), base(base), hp(base->hp), gold(random(base->gold)), inside_building(false)
+	{
+
+	}
 
 	inline INT2 GetPos() const
 	{
@@ -111,16 +111,71 @@ struct Unit
 		return pt;
 	}
 
-	inline cstring GetText() const
+	virtual inline cstring GetText() const
 	{
-		return Format("%s  Hp: %d/%d\nAttack: %d  Defense: %d\nSpeed: %g / %g", base->name, hp, base->hp, base->attack, base->defense, base->move_speed, base->attack_speed);
+		return Format("%s  Hp: %d/%d\nAttack: %d  Defense: %d\nSpeed: %g / %g\nGold: %d", base->name, hp, base->hp, base->attack, base->defense, base->move_speed, base->attack_speed, gold);
 	}
+};
+
+struct Player : public Unit
+{
+	int lvl, exp, need_exp, untaxed_gold;
+	bool sleeping;
+	float sleeping_progress;
+
+	Player() : Unit(&base_units[0]), exp(0), untaxed_gold(0), lvl(1), need_exp(100), sleeping(false)
+	{
+		gold = 100;
+		is_player = true;
+	}
+
+	virtual inline cstring GetText() const
+	{
+		return Format("%s  Hp: %d/%d\nLvl: %d   Exp: %d/%d\nAttack: %d  Defense: %d\nSpeed: %g / %g\nGold: %d (%d)", base->name, hp, base->hp, lvl, exp, need_exp, base->attack, base->defense,
+			base->move_speed, base->attack_speed, gold, untaxed_gold);
+	}
+};
+
+struct Building
+{
+	const BaseBuilding* base;
+};
+
+enum BuildingTile
+{
+	BT_WALL,
+	BT_DOOR,
+	BT_SIGN
 };
 
 struct Tile
 {
 	Unit* unit;
-	bool blocked;
+	int type;
+	struct 
+	{
+		Building* building;
+		BuildingTile building_tile;
+	};
+
+	inline bool IsBlocking(bool is_player=false) const
+	{
+		if(building)
+		{
+			if(building_tile == BT_DOOR)
+				return !is_player;
+			return true;
+		}
+		else
+			return tiles[type].block;
+	}
+
+	inline void PutBuilding(Building* b, BuildingTile bt)
+	{
+		assert(b);
+		building = b;
+		building_tile = bt;
+	}
 };
 
 struct Hit
@@ -133,8 +188,9 @@ struct Text
 {
 	string text;
 	SDL_Texture* tex;
+	int w;
 
-	Text() : tex(NULL)
+	Text() : tex(NULL), w(200)
 	{
 
 	}
@@ -147,7 +203,7 @@ struct Text
 		if(tex)
 			SDL_DestroyTexture(tex);
 		SDL_Color color = {0,0,0};
-		SDL_Surface* s = TTF_RenderText_Blended_Wrapped(font, text.c_str(), color, 200);
+		SDL_Surface* s = TTF_RenderText_Blended_Wrapped(font, text.c_str(), color, w);
 		if(!s)
 			throw Format("ERROR: Failed to render TTF text (%d).", TTF_GetError());
 		tex = SDL_CreateTextureFromSurface(renderer, s);
@@ -166,8 +222,10 @@ struct Text
 Tile mapa[MAP_SIZE*MAP_SIZE];
 vector<Unit*> units;
 vector<Hit> hits;
-Unit* player, *selected;
-Text text[2];
+Player* player;
+Unit* selected;
+Text text[4];
+Building* inn;
 
 //=============================================================================
 void InitSDL()
@@ -229,16 +287,8 @@ void LoadMedia()
 	tHpBar = LoadTexture("data/textures/hpbar.png");
 	tHit = LoadTexture("data/textures/hit.png");
 	tSelected = LoadTexture("data/textures/selected.png");
-
-	for(int i=0; i<2; ++i)
-	{
-		tiles[i].w = 32;
-		tiles[i].h = 32;
-	}
-	tiles[0].x = 0;
-	tiles[0].y = 0;
-	tiles[1].x = 32;
-	tiles[1].y = 0;
+	tBuilding = LoadTexture("data/textures/building.png");
+	tButton = LoadTexture("data/textures/button.png");
 
 	font = TTF_OpenFont("data/HighlandGothicFLF.ttf", 16);
 	if(!font)
@@ -248,13 +298,15 @@ void LoadMedia()
 //=============================================================================
 void CleanMedia()
 {
-	for(int i=0; i<2; ++i)
+	for(int i=0; i<4; ++i)
 		text[i].Delete();
 	SDL_DestroyTexture(tTiles);
 	SDL_DestroyTexture(tUnit);
 	SDL_DestroyTexture(tHpBar);
 	SDL_DestroyTexture(tHit);
 	SDL_DestroyTexture(tSelected);
+	SDL_DestroyTexture(tBuilding);
+	SDL_DestroyTexture(tButton);
 	TTF_CloseFont(font);
 }
 
@@ -263,44 +315,69 @@ void InitGame()
 {
 	srand((uint)time(NULL));
 	for(int i=0; i<MAP_SIZE*MAP_SIZE; ++i)
-		mapa[i].blocked = (rand()%8 == 0);
+	{
+		int c = rand()%8;
+		Tile& tile = mapa[i];
+		tile.unit = NULL;
+		tile.building = NULL;
+		if(c == 0)
+			tile.type = 1;
+		else if(c == 1 || c == 2)
+			tile.type = 2;
+		else
+			tile.type = 0;
+	}
 	
-	player = new Unit;
-	player->base = &base_units[0];
+	player = new Player;
 	player->pos = INT2(0,0);
-	player->hp = player->base->hp;
-	player->moving = false;
-	player->waiting = 0.f;
 	units.push_back(player);
-	mapa[0].blocked = false;
+	mapa[0].type = 0;
 	mapa[0].unit = player;
 
 	Unit* enemy;
 	
 	for(int i=0; i<3; ++i)
 	{
-		enemy = new Unit;
-		enemy->base = &base_units[1];
+		enemy = new Unit(&base_units[1]);
 		enemy->pos = INT2(8+rand()%8,8+rand()%8);
-		enemy->hp = enemy->base->hp;
-		enemy->moving = false;
-		enemy->waiting = false;
 		units.push_back(enemy);
 		Tile& tile = mapa[enemy->pos.x+enemy->pos.y*MAP_SIZE];
-		tile.blocked = false;
+		tile.type = 0;
 		tile.unit = enemy;
 	}
 
-	enemy = new Unit;
-	enemy->base = &base_units[2];
+	enemy = new Unit(&base_units[2]);
 	enemy->pos = INT2(19,19);
-	enemy->hp = enemy->base->hp;
-	enemy->moving = false;
-	enemy->waiting = false;
 	units.push_back(enemy);
 	Tile& tile = mapa[enemy->pos.x+enemy->pos.y*MAP_SIZE];
-	tile.blocked = false;
+	tile.type = 0;
 	tile.unit = enemy;
+
+#define M(x,y) mapa[(x)+(y)*MAP_SIZE]
+
+	Building* b = new Building;
+	b->base = &base_buildings[0];
+	M(5,1).PutBuilding(b, BT_WALL);
+	M(6,1).PutBuilding(b, BT_SIGN);
+	M(7,1).PutBuilding(b, BT_WALL);
+	M(5,2).PutBuilding(b, BT_WALL);
+	M(6,2).PutBuilding(b, BT_DOOR);
+	M(7,2).PutBuilding(b, BT_WALL);
+	M(6,3).type = 0;
+
+	inn = b;
+
+	text[0].w = 300;
+	text[1].w = 300;
+	text[2].w = 600;
+	text[3].w = 600;
+}
+
+//=============================================================================
+void CleanGame()
+{
+	delete inn;
+	DeleteElements(units);
 }
 
 //=============================================================================
@@ -310,16 +387,41 @@ void Draw()
 	SDL_RenderClear(renderer);
 	
 	// tiles
-	SDL_Rect r;
-	r.w = 32;
-	r.h = 32;
-	for(int yy=0; yy<MAP_SIZE; ++yy)
+	SDL_Rect r, r4;
+	r4.w = r.w = 32;
+	r4.h = r.h = 32;
+	for(int y=0; y<MAP_SIZE; ++y)
 	{
-		for(int xx=0; xx<MAP_SIZE; ++xx)
+		for(int x=0; x<MAP_SIZE; ++x)
 		{
-			r.x = xx*32;
-			r.y = yy*32;
-			SDL_RenderCopy(renderer, tTiles, &tiles[mapa[xx+yy*MAP_SIZE].blocked ? 1 : 0], &r);
+			r.x = x*32;
+			r.y = y*32;
+			Tile& tile = mapa[x+y*MAP_SIZE];
+			if(tile.building)
+			{
+				if(tile.building_tile == BT_DOOR)
+				{
+					r4.x = door_offset.x*32;
+					r4.y = door_offset.y*32;
+				}
+				else if(tile.building_tile == BT_WALL)
+				{
+					r4.x = wall_offset.x*32;
+					r4.y = wall_offset.y*32;
+				}
+				else
+				{
+					r4.x = wall_offset.x*32;
+					r4.y = wall_offset.y*32;
+					SDL_RenderCopy(renderer, tBuilding, &r4, &r);
+					const INT2& offset = tile.building->base->offset;
+					r4.x = offset.x*32;
+					r4.y = offset.y*32;
+				}
+				SDL_RenderCopy(renderer, tBuilding, &r4, &r);
+			}
+			else
+				SDL_RenderCopy(renderer, tTiles, &tiles[mapa[x+y*MAP_SIZE].type].rect, &r);
 		}
 	}
 	
@@ -327,6 +429,8 @@ void Draw()
 	for(vector<Unit*>::iterator it = units.begin(), end = units.end(); it != end; ++it)
 	{
 		Unit& u = **it;
+		if(u.inside_building)
+			continue;
 		INT2 pos = u.GetPos();
 		r.x = pos.x;
 		r.y = pos.y;
@@ -405,6 +509,44 @@ void Draw()
 		SDL_RenderCopy(renderer, text[1].tex, NULL, &r);
 	}
 
+	// building
+	if(player && player->alive && player->inside_building)
+	{
+		// text
+		text[2].Set(Format("Inside building: %s", inn->base->name));
+		SDL_QueryTexture(text[2].tex, NULL, NULL, &r.w, &r.h);
+		r.x = 32;
+		r.y = 672;
+		SDL_RenderCopy(renderer, text[2].tex, NULL, &r);
+
+		// button
+		r.x = 32;
+		r.y = 700;
+		r.w = 16;
+		r.h = 16;
+		r4.x = 0;
+		r4.y = 0;
+		r4.w = 16;
+		r4.h = 16;
+		SDL_RenderCopy(renderer, tButton, &r4, &r);
+
+		// button text
+		bool draw_text = false;
+		if(cursor_pos.x >= 32 && cursor_pos.y >= 700 && cursor_pos.x < 32+16 && cursor_pos.y < 700+16)
+		{
+			draw_text = true;
+			text[3].Set("Sleep inside inn for 10 gp.");
+		}
+
+		if(draw_text)
+		{
+			SDL_QueryTexture(text[3].tex, NULL, NULL, &r.w, &r.h);
+			r.x = 32;
+			r.y = 728;
+			SDL_RenderCopy(renderer, text[3].tex, NULL, &r);
+		}
+	}
+
 	// display render
 	SDL_RenderPresent(renderer);
 }
@@ -416,11 +558,11 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 	if(u.new_pos.x >= 0 && u.new_pos.y >= 0 && u.new_pos.x < MAP_SIZE && u.new_pos.y < MAP_SIZE)
 	{
 		Tile& tile = mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE];
-		if(tile.blocked)
+		if(tile.IsBlocking(u.is_player))
 			return false;
 		else if(tile.unit)
 		{
-			if(attack)
+			if(attack && tile.unit->alive)
 			{
 				// attack
 				Hit& hit = Add1(hits);
@@ -428,6 +570,11 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 				hit.timer = 0.5f;
 				u.waiting = 1.f/u.base->attack_speed;
 				tile.unit->hp -= (u.base->attack - tile.unit->base->defense);
+				if(tile.unit->hp <= 0)
+				{
+					tile.unit->alive = false;
+					player->untaxed_gold += tile.unit->gold;
+				}
 				return true;
 			}
 			else
@@ -437,8 +584,8 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 		{
 			if(new_dir == DIR_NE || new_dir == DIR_NW || new_dir == DIR_SE || new_dir == DIR_SW)
 			{
-				if(mapa[u.pos.x+dir_change[new_dir].x+u.pos.y*MAP_SIZE].blocked &&
-					mapa[u.pos.x+(u.pos.y+dir_change[new_dir].y)*MAP_SIZE].blocked)
+				if(mapa[u.pos.x+dir_change[new_dir].x+u.pos.y*MAP_SIZE].IsBlocking() &&
+					mapa[u.pos.x+(u.pos.y+dir_change[new_dir].y)*MAP_SIZE].IsBlocking())
 					return false;
 			}
 
@@ -512,63 +659,120 @@ DIR GetDir(const INT2& a, const INT2& b)
 void Update(float dt)
 {
 	// selecting unit
-	if(MousePressedRelease(1))
+	INT2 tile(cursor_pos.x/32, cursor_pos.y/32);
+	if(tile.x >= 0 && tile.y >= 0 && tile.x < MAP_SIZE && tile.y < MAP_SIZE && MousePressedRelease(1))
 	{
-		INT2 tile(cursor_pos.x/32, cursor_pos.y/32);
-		if(tile.x >= 0 && tile.y >= 0 && tile.x < MAP_SIZE && tile.y < MAP_SIZE)
+		Tile& t = mapa[tile.x+tile.y*MAP_SIZE];
+		selected = t.unit;
+	}
+
+	// sleep button
+	if(player && player->alive && player->inside_building && cursor_pos.x >= 32 && cursor_pos.y >= 700 && cursor_pos.x < 32+16 && cursor_pos.y < 700+16 && MousePressedRelease(1))
+	{
+		if(player->gold >= 10 && !player->sleeping && player->hp != player->base->hp)
 		{
-			Tile& t = mapa[tile.x+tile.y*MAP_SIZE];
-			selected = t.unit;
+			player->gold -= 10;
+			player->sleeping = true;
+			player->sleeping_progress = 0.f;
 		}
 	}
 
 	// update player
-	if(player && player->waiting <= 0.f && !player->moving)
+	if(player && player->alive && player->waiting <= 0.f && !player->moving)
 	{
 		Unit& u = *player;
 
-		struct Key1
+		if(player->sleeping)
 		{
-			SDL_Scancode k1;
-			SDL_Scancode k2;
-			DIR dir;
-		};
-		const Key1 keys1[] = {
-			SDL_SCANCODE_LEFT, SDL_SCANCODE_KP_4, DIR_W,
-			SDL_SCANCODE_RIGHT, SDL_SCANCODE_KP_6, DIR_E,
-			SDL_SCANCODE_UP, SDL_SCANCODE_KP_8, DIR_N,
-			SDL_SCANCODE_DOWN, SDL_SCANCODE_KP_2, DIR_S
-		};
-		struct Key2
-		{
-			SDL_Scancode k1;
-			SDL_Scancode k2;
-			SDL_Scancode k3;
-			DIR dir;
-		};
-		const Key2 keys2[] = {
-			SDL_SCANCODE_KP_1, SDL_SCANCODE_LEFT, SDL_SCANCODE_DOWN, DIR_SW,
-			SDL_SCANCODE_KP_3, SDL_SCANCODE_RIGHT, SDL_SCANCODE_DOWN, DIR_SE,
-			SDL_SCANCODE_KP_7, SDL_SCANCODE_LEFT, SDL_SCANCODE_UP, DIR_NW,
-			SDL_SCANCODE_KP_9, SDL_SCANCODE_RIGHT, SDL_SCANCODE_UP, DIR_NE
-		};
-
-		for(int i=0; i<4; ++i)
-		{
-			if(KeyDown(keys2[i].k1) || (KeyDown(keys2[i].k2) && KeyDown(keys2[i].k3)))
+			player->sleeping_progress += dt;
+			if(player->sleeping_progress >= 1.f)
 			{
-				if(TryMove(u, keys2[i].dir, true))
-					break;
+				player->hp += 5;
+				player->sleeping_progress = 0.f;
+				if(player->hp >= player->base->hp)
+				{
+					player->hp = player->base->hp;
+					player->sleeping = false;
+				}
 			}
 		}
-		if(!u.moving && u.waiting <= 0.f)
+		else if(u.inside_building)
 		{
+			// unit inside building, press SPACE to exit
+			if(KeyPressedRelease(SDL_SCANCODE_SPACE) && !mapa[u.pos.x+u.pos.y*MAP_SIZE].unit)
+			{
+				if(!TryMove(u, DIR_S, false))
+				{
+					if(rand()%2 == 0)
+					{
+						if(!TryMove(u, DIR_SW, false))
+						{
+							if(TryMove(u, DIR_SE, false))
+								u.inside_building = false;
+						}
+						else
+							u.inside_building = false;
+					}
+					else
+					{
+						if(!TryMove(u, DIR_SE, false))
+						{
+							if(TryMove(u, DIR_SW, false))
+								u.inside_building = false;
+						}
+						else
+							u.inside_building = false;
+					}
+				}
+				else
+					u.inside_building = false;
+			}
+		}
+		else
+		{
+			struct Key1
+			{
+				SDL_Scancode k1;
+				SDL_Scancode k2;
+				DIR dir;
+			};
+			const Key1 keys1[] = {
+				SDL_SCANCODE_LEFT, SDL_SCANCODE_KP_4, DIR_W,
+				SDL_SCANCODE_RIGHT, SDL_SCANCODE_KP_6, DIR_E,
+				SDL_SCANCODE_UP, SDL_SCANCODE_KP_8, DIR_N,
+				SDL_SCANCODE_DOWN, SDL_SCANCODE_KP_2, DIR_S
+			};
+			struct Key2
+			{
+				SDL_Scancode k1;
+				SDL_Scancode k2;
+				SDL_Scancode k3;
+				DIR dir;
+			};
+			const Key2 keys2[] = {
+				SDL_SCANCODE_KP_1, SDL_SCANCODE_LEFT, SDL_SCANCODE_DOWN, DIR_SW,
+				SDL_SCANCODE_KP_3, SDL_SCANCODE_RIGHT, SDL_SCANCODE_DOWN, DIR_SE,
+				SDL_SCANCODE_KP_7, SDL_SCANCODE_LEFT, SDL_SCANCODE_UP, DIR_NW,
+				SDL_SCANCODE_KP_9, SDL_SCANCODE_RIGHT, SDL_SCANCODE_UP, DIR_NE
+			};
+
 			for(int i=0; i<4; ++i)
 			{
-				if(KeyDown(keys1[i].k1) || KeyDown(keys1[i].k2))
+				if(KeyDown(keys2[i].k1) || (KeyDown(keys2[i].k2) && KeyDown(keys2[i].k3)))
 				{
-					if(TryMove(u, keys1[i].dir, true))
+					if(TryMove(u, keys2[i].dir, true))
 						break;
+				}
+			}
+			if(!u.moving && u.waiting <= 0.f)
+			{
+				for(int i=0; i<4; ++i)
+				{
+					if(KeyDown(keys1[i].k1) || KeyDown(keys1[i].k2))
+					{
+						if(TryMove(u, keys1[i].dir, true))
+							break;
+					}
 				}
 			}
 		}
@@ -603,9 +807,22 @@ void Update(float dt)
 				u.moving = false;
 				mapa[u.pos.x+u.pos.y*MAP_SIZE].unit = NULL;
 				u.pos = u.new_pos;
+				Tile& tile = mapa[u.pos.x+u.pos.y*MAP_SIZE];
+				if(tile.building)
+				{
+					tile.unit = NULL;
+					u.inside_building = true;
+					if(player->untaxed_gold)
+					{
+						int tax = player->untaxed_gold*TAX/100;
+						player->untaxed_gold -= tax;
+						player->gold += player->untaxed_gold;
+						player->untaxed_gold = 0;
+					}
+				}
 			}
 		}
-		else if(&u != player && player)
+		else if(&u != player && player && player->alive && !player->inside_building)
 		{
 			INT2 enemy_pt;
 			int dist = GetClosestPoint(u.pos, *player, enemy_pt);
@@ -619,6 +836,11 @@ void Update(float dt)
 					hit.timer = 0.5f;
 					u.waiting = 1.f/u.base->attack_speed;
 					player->hp -= u.base->attack - player->base->defense;
+					if(player->hp <= 0)
+					{
+						player->alive = false;
+						u.gold += (player->gold + player->untaxed_gold);
+					}
 				}
 				else
 				{
@@ -632,7 +854,7 @@ void Update(float dt)
 						const SubDir sub_dir[8] = {
 							DIR_SE, DIR_SW, //DIR_S,
 							DIR_W, DIR_S, //DIR_SW,
-							DIR_NW, DIR_NE, //DIR_W,
+							DIR_NW, DIR_SW, //DIR_W,
 							DIR_N, DIR_W, //DIR_NW,
 							DIR_NE, DIR_NW, //DIR_N,
 							DIR_N, DIR_E, //DIR_NE,
@@ -703,18 +925,12 @@ int main(int argc, char *argv[])
 				else if(e.type == SDL_KEYDOWN)
 				{
 					if(e.key.state == SDL_PRESSED)
-					{
-						if(keystate[e.key.keysym.scancode] <= IS_RELEASED)
-							keystate[e.key.keysym.scancode] = IS_PRESSED;
-					}
+						ProcessKey(e.key.keysym.scancode, true);
 				}
 				else if(e.type == SDL_KEYUP)
 				{
 					if(e.key.state == SDL_RELEASED)
-					{
-						if(keystate[e.key.keysym.scancode] >= IS_DOWN)
-							keystate[e.key.keysym.scancode] = IS_RELEASED;
-					}
+						ProcessKey(e.key.keysym.scancode, false);
 				}
 				else if(e.type == SDL_MOUSEMOTION || e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP)
 				{
@@ -722,18 +938,12 @@ int main(int argc, char *argv[])
 					if(e.type == SDL_MOUSEBUTTONDOWN)
 					{
 						if(e.button.state == SDL_PRESSED && e.button.button < MAX_BUTTON)
-						{
-							if(mousestate[e.button.button] <= IS_RELEASED)
-								mousestate[e.button.button] = IS_PRESSED;
-						}
+							ProcessButton(e.button.button, true);
 					}
 					else if(e.type == SDL_MOUSEBUTTONUP)
 					{
 						if(e.button.state == SDL_RELEASED && e.button.button < MAX_BUTTON)
-						{
-							if(mousestate[e.button.button] >= IS_DOWN)
-								mousestate[e.button.button] = IS_RELEASED;
-						}
+							ProcessButton(e.button.button, false);
 					}
 				}
 			}
@@ -745,20 +955,10 @@ int main(int argc, char *argv[])
 
 			Draw();
 			Update(dt);
-
-			// update input state
-			for(uint i=0; i < SDL_NUM_SCANCODES; ++i)
-			{
-				if(keystate[i] & 1)
-					--keystate[i];
-			}
-			for(uint i=0; i< MAX_BUTTON; ++i)
-			{
-				if(mousestate[i] & 1)
-					--mousestate[i];
-			}
+			UpdateInput();
 		}
 
+		CleanGame();
 		CleanMedia();
 		CleanSDL();
 	}
