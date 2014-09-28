@@ -1,7 +1,7 @@
 #include "Pch.h"
 #include "Input.h"
 
-const int VERSION = 0;
+const int VERSION = 1;
 const int MAP_W = 20;
 const int MAP_H = 61;
 const int TAX = 10;
@@ -794,6 +794,7 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 			u.dir = new_dir;
 			u.moving = true;
 			u.move_progress = 0.f;
+			u.inside_building = false;
 			mapa[u.new_pos.x+u.new_pos.y*MAP_W].unit = u._ref;
 			return true;
 		}
@@ -858,6 +859,49 @@ DIR GetDir(const INT2& a, const INT2& b)
 }
 
 //=============================================================================
+DIR GetDirKey()
+{
+	struct Key1
+	{
+		SDL_Scancode k1;
+		SDL_Scancode k2;
+		DIR dir;
+	};
+	const Key1 keys1[] = {
+		SDL_SCANCODE_LEFT, SDL_SCANCODE_KP_4, DIR_W,
+		SDL_SCANCODE_RIGHT, SDL_SCANCODE_KP_6, DIR_E,
+		SDL_SCANCODE_UP, SDL_SCANCODE_KP_8, DIR_N,
+		SDL_SCANCODE_DOWN, SDL_SCANCODE_KP_2, DIR_S
+	};
+	struct Key2
+	{
+		SDL_Scancode k1;
+		SDL_Scancode k2;
+		SDL_Scancode k3;
+		DIR dir;
+	};
+	const Key2 keys2[] = {
+		SDL_SCANCODE_KP_1, SDL_SCANCODE_LEFT, SDL_SCANCODE_DOWN, DIR_SW,
+		SDL_SCANCODE_KP_3, SDL_SCANCODE_RIGHT, SDL_SCANCODE_DOWN, DIR_SE,
+		SDL_SCANCODE_KP_7, SDL_SCANCODE_LEFT, SDL_SCANCODE_UP, DIR_NW,
+		SDL_SCANCODE_KP_9, SDL_SCANCODE_RIGHT, SDL_SCANCODE_UP, DIR_NE
+	};
+
+	for(int i=0; i<4; ++i)
+	{
+		if(KeyDown(keys2[i].k1) || (KeyDown(keys2[i].k2) && KeyDown(keys2[i].k3)))
+			return keys2[i].dir;
+	}
+	for(int i=0; i<4; ++i)
+	{
+		if(KeyDown(keys1[i].k1) || KeyDown(keys1[i].k2))
+			return keys1[i].dir;
+	}
+	
+	return DIR_INVALID;
+}
+
+//=============================================================================
 void Update(float dt)
 {
 	// selecting unit
@@ -901,82 +945,37 @@ void Update(float dt)
 		else if(u.inside_building)
 		{
 			// unit inside building, press SPACE to exit
-			if(KeyPressedRelease(SDL_SCANCODE_SPACE) && !mapa[u.pos.x+u.pos.y*MAP_W].unit)
+			if(!mapa[u.pos.x+u.pos.y*MAP_W].unit)
 			{
-				if(!TryMove(u, DIR_S, false))
+				if(KeyPressedRelease(SDL_SCANCODE_SPACE) || KeyPressedRelease(SDL_SCANCODE_KP_5))
 				{
-					if(rand()%2 == 0)
+					if(!TryMove(u, DIR_S, false))
 					{
-						if(!TryMove(u, DIR_SW, false))
+						if(rand()%2 == 0)
 						{
-							if(TryMove(u, DIR_SE, false))
-								u.inside_building = false;
+							if(!TryMove(u, DIR_SW, false))
+								TryMove(u, DIR_SE, false);
 						}
 						else
-							u.inside_building = false;
-					}
-					else
-					{
-						if(!TryMove(u, DIR_SE, false))
 						{
-							if(TryMove(u, DIR_SW, false))
-								u.inside_building = false;
+							if(!TryMove(u, DIR_SE, false))
+								TryMove(u, DIR_SW, false);
 						}
-						else
-							u.inside_building = false;
 					}
 				}
 				else
-					u.inside_building = false;
+				{
+					DIR dir = GetDirKey();
+					if(dir != DIR_INVALID)
+						TryMove(u, dir, false);
+				}
 			}
 		}
 		else
 		{
-			struct Key1
-			{
-				SDL_Scancode k1;
-				SDL_Scancode k2;
-				DIR dir;
-			};
-			const Key1 keys1[] = {
-				SDL_SCANCODE_LEFT, SDL_SCANCODE_KP_4, DIR_W,
-				SDL_SCANCODE_RIGHT, SDL_SCANCODE_KP_6, DIR_E,
-				SDL_SCANCODE_UP, SDL_SCANCODE_KP_8, DIR_N,
-				SDL_SCANCODE_DOWN, SDL_SCANCODE_KP_2, DIR_S
-			};
-			struct Key2
-			{
-				SDL_Scancode k1;
-				SDL_Scancode k2;
-				SDL_Scancode k3;
-				DIR dir;
-			};
-			const Key2 keys2[] = {
-				SDL_SCANCODE_KP_1, SDL_SCANCODE_LEFT, SDL_SCANCODE_DOWN, DIR_SW,
-				SDL_SCANCODE_KP_3, SDL_SCANCODE_RIGHT, SDL_SCANCODE_DOWN, DIR_SE,
-				SDL_SCANCODE_KP_7, SDL_SCANCODE_LEFT, SDL_SCANCODE_UP, DIR_NW,
-				SDL_SCANCODE_KP_9, SDL_SCANCODE_RIGHT, SDL_SCANCODE_UP, DIR_NE
-			};
-
-			for(int i=0; i<4; ++i)
-			{
-				if(KeyDown(keys2[i].k1) || (KeyDown(keys2[i].k2) && KeyDown(keys2[i].k3)))
-				{
-					if(TryMove(u, keys2[i].dir, true))
-						break;
-				}
-			}
-			if(!u.moving && u.waiting <= 0.f)
-			{
-				for(int i=0; i<4; ++i)
-				{
-					if(KeyDown(keys1[i].k1) || KeyDown(keys1[i].k2))
-					{
-						if(TryMove(u, keys1[i].dir, true))
-							break;
-					}
-				}
-			}
+			DIR dir = GetDirKey();
+			if(dir != DIR_INVALID)
+				TryMove(u, dir, true);
 		}
 	}
 

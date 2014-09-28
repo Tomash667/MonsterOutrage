@@ -1,10 +1,8 @@
-NEXT VERSION [v1]:
 + pathfinding
 + hit chance
 + friendly guards
 + marketplace [potion]
 + selectable buildings with description
-+ can exit building with move keys
 + text about healing
 + healing depends on max hp
 + exp for attacking
