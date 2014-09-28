@@ -2,8 +2,10 @@
 #include "Input.h"
 
 const int VERSION = 0;
-const int MAP_SIZE = 20;
+const int MAP_W = 20;
+const int MAP_H = 61;
 const int TAX = 10;
+const INT2 SCREEN_SIZE(640, 640);
 
 enum DIR
 {
@@ -69,7 +71,7 @@ struct BaseUnit
 	"Hero", 1, 100, 40, 5, 5.f, 1.f, INT2(0,0), INT2(0,0),
 	"Goblin", 1, 50, 12, 0, 6.f, 1.2f, INT2(1,0), INT2(10,20),
 	"Orc", 2, 75, 20, 5, 5.f, 0.9f, INT2(0,1), INT2(25,50),
-	"Minotaur", 4, 150, 50, 10, 4.f, 0.95f, INT2(1,1), INT2(65,80)
+	"Minotaur", 3, 120, 30, 10, 4.f, 0.95f, INT2(1,1), INT2(65,80)
 };
 
 struct BaseBuilding
@@ -365,7 +367,8 @@ struct Text
 	}
 };
 
-Tile mapa[MAP_SIZE*MAP_SIZE];
+INT2 cam_pos;
+Tile mapa[MAP_W*MAP_H];
 vector<Unit*> units;
 vector<Hit> hits;
 Player* player;
@@ -376,7 +379,7 @@ Building* inn;
 //=============================================================================
 void InitSDL()
 {
-	printf("INFO: Initializing SLD.");
+	printf("INFO: Initializing SLD.\n");
 
 	if(SDL_Init(SDL_INIT_VIDEO) < 0)
 		throw Format("ERROR: Failed to initialize SDL (%d).", SDL_GetError());
@@ -402,7 +405,7 @@ void InitSDL()
 //=============================================================================
 void CleanSDL()
 {
-	printf("INFO: Cleaning SDL.");
+	printf("INFO: Cleaning SDL.\n");
 	
 	SDL_DestroyRenderer(renderer);
 	SDL_DestroyWindow(window);
@@ -460,9 +463,10 @@ void CleanMedia()
 void InitGame()
 {
 	RefTable.Init();
-
 	srand((uint)time(NULL));
-	for(int i=0; i<MAP_SIZE*MAP_SIZE; ++i)
+
+	// map
+	for(int i=0; i<MAP_W*MAP_H; ++i)
 	{
 		int c = rand()%8;
 		Tile& tile = mapa[i];
@@ -476,32 +480,60 @@ void InitGame()
 			tile.type = 0;
 	}
 	
+	// player
 	player = new Player;
 	player->pos = INT2(0,0);
 	units.push_back(player);
 	mapa[0].type = 0;
 	mapa[0].unit = player->_ref;
 
-	Unit* enemy;
-	
-	for(int i=0; i<3; ++i)
+	// enemies
+	struct SpawnGroup
 	{
-		enemy = new Unit(&base_units[1]);
-		enemy->pos = INT2(8+rand()%8,8+rand()%8);
-		units.push_back(enemy);
-		Tile& tile = mapa[enemy->pos.x+enemy->pos.y*MAP_SIZE];
-		tile.type = 0;
-		tile.unit = enemy->_ref;
+		int line, enemy[3], drop;
+	};
+
+	const SpawnGroup groups[] = {
+		11, 2, 0, 0, 2,
+		15, 3, 0, 0, 2,
+		19, 0, 1, 0, 0,
+		25, 2, 1, 0, 2,
+		29, 0, 2, 0, 1,
+		35, 1, 2, 0, 2,
+		39, 2, 2, 0, 2,
+		45, 0, 3, 0, 1,
+		50, 0, 0, 1, 0,
+		55, 0, 2, 1, 1,
+		60, 0, 0, 2, 0
+	};
+	const int count = countof(groups);
+
+	for(int i=0; i<11; ++i)
+	{
+		const SpawnGroup& group = groups[i];
+		for(int j=0; j<3; ++j)
+		{
+			int enemy_count = group.enemy[j];
+			while(enemy_count)
+			{
+				INT2 pt(rand()%MAP_W, group.line);
+				if(group.drop)
+					pt.y += random(-group.drop, group.drop);
+				Tile& tile = mapa[pt.x+pt.y*MAP_W];
+				if(tile.type != 1 && !tile.unit)
+				{
+					--enemy_count;
+					Unit* enemy = new Unit(&base_units[j+1]);
+					enemy->pos = pt;
+					units.push_back(enemy);
+					tile.unit = enemy->_ref;
+				}
+			}
+		}
 	}
-
-	enemy = new Unit(&base_units[2]);
-	enemy->pos = INT2(19,19);
-	units.push_back(enemy);
-	Tile& tile = mapa[enemy->pos.x+enemy->pos.y*MAP_SIZE];
-	tile.type = 0;
-	tile.unit = enemy->_ref;
-
-#define M(x,y) mapa[(x)+(y)*MAP_SIZE]
+	
+	// inn
+#define M(x,y) mapa[(x)+(y)*MAP_W]
 
 	Building* b = new Building;
 	b->base = &base_buildings[0];
@@ -515,6 +547,7 @@ void InitGame()
 
 	inn = b;
 
+	// text width
 	text[0].w = 300;
 	text[1].w = 300;
 	text[2].w = 600;
@@ -533,18 +566,30 @@ void Draw()
 {
 	// clear render
 	SDL_RenderClear(renderer);
+
+	// viewport
+	SDL_Rect view;
+	view.w = 32*20;
+	view.h = 32*20;
+	view.x = 0;
+	view.y = 0;
+	SDL_RenderSetViewport(renderer, &view);
 	
 	// tiles
 	SDL_Rect r, r4;
 	r4.w = r.w = 32;
 	r4.h = r.h = 32;
-	for(int y=0; y<MAP_SIZE; ++y)
+	int start_x = cam_pos.x/32,
+		start_y = cam_pos.y/32,
+		end_x = min((cam_pos.x+SCREEN_SIZE.x)/32+1, MAP_W),
+		end_y = min((cam_pos.y+SCREEN_SIZE.y)/32+1, MAP_H);
+	for(int y=start_y; y<end_y; ++y)
 	{
-		for(int x=0; x<MAP_SIZE; ++x)
+		for(int x=start_x; x<end_x; ++x)
 		{
-			r.x = x*32;
-			r.y = y*32;
-			Tile& tile = mapa[x+y*MAP_SIZE];
+			r.x = x*32 - cam_pos.x;
+			r.y = y*32 - cam_pos.y;
+			Tile& tile = mapa[x+y*MAP_W];
 			if(tile.building)
 			{
 				if(tile.building_tile == BT_DOOR)
@@ -569,7 +614,7 @@ void Draw()
 				SDL_RenderCopy(renderer, tBuilding, &r4, &r);
 			}
 			else
-				SDL_RenderCopy(renderer, tTiles, &tiles[mapa[x+y*MAP_SIZE].type].rect, &r);
+				SDL_RenderCopy(renderer, tTiles, &tiles[mapa[x+y*MAP_W].type].rect, &r);
 		}
 	}
 	
@@ -580,8 +625,8 @@ void Draw()
 		if(u.inside_building)
 			continue;
 		INT2 pos = u.GetPos();
-		r.x = pos.x;
-		r.y = pos.y;
+		r.x = pos.x-cam_pos.x;
+		r.y = pos.y-cam_pos.y;
 		SDL_Rect rr;
 		rr.w = 32;
 		rr.h = 32;
@@ -608,7 +653,7 @@ void Draw()
 			}
 			SDL_SetTextureColorMod(tHpBar, cr, g, b);
 			SDL_Rect r2;
-			r2.w = int(float(u.hp)/100*32);
+			r2.w = int(float(u.hp)/u.base->hp*32);
 			if(r2.w <= 0)
 				r2.w = 1;
 			r2.h = 2;
@@ -626,8 +671,8 @@ void Draw()
 	// attack image
 	for(vector<Hit>::iterator it = hits.begin(), end = hits.end(); it != end; ++it)
 	{
-		r.x = it->pos.x;
-		r.y = it->pos.y;
+		r.x = it->pos.x - cam_pos.x;
+		r.y = it->pos.y - cam_pos.y;
 		SDL_RenderCopy(renderer, tHit, NULL, &r);
 	}
 
@@ -635,16 +680,18 @@ void Draw()
 	if(CheckRef(selected))
 	{
 		INT2 pos = selected->GetRef().GetPos();
-		r.x = pos.x;
-		r.y = pos.y;
+		r.x = pos.x - cam_pos.x;
+		r.y = pos.y - cam_pos.y;
 		SDL_RenderCopy(renderer, tSelected, NULL, &r);
 	}
+
+	SDL_RenderSetViewport(renderer, NULL);
 	
 	// text
 	if(player)
 		text[0].Set(player->GetText());
 	SDL_QueryTexture(text[0].tex, NULL, NULL, &r.w, &r.h);
-	r.x = 32*(MAP_SIZE+1);
+	r.x = 32*(MAP_W+1);
 	r.y = 32;
 	SDL_RenderCopy(renderer, text[0].tex, NULL, &r);
 
@@ -703,9 +750,9 @@ void Draw()
 bool TryMove(Unit& u, DIR new_dir, bool attack)
 {
 	u.new_pos = u.pos + dir_change[new_dir];
-	if(u.new_pos.x >= 0 && u.new_pos.y >= 0 && u.new_pos.x < MAP_SIZE && u.new_pos.y < MAP_SIZE)
+	if(u.new_pos.x >= 0 && u.new_pos.y >= 0 && u.new_pos.x < MAP_W && u.new_pos.y < MAP_H)
 	{
-		Tile& tile = mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE];
+		Tile& tile = mapa[u.new_pos.x+u.new_pos.y*MAP_W];
 		if(tile.IsBlocking(u.is_player))
 			return false;
 		else if(tile.unit)
@@ -739,15 +786,15 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 		{
 			if(new_dir == DIR_NE || new_dir == DIR_NW || new_dir == DIR_SE || new_dir == DIR_SW)
 			{
-				if(mapa[u.pos.x+dir_change[new_dir].x+u.pos.y*MAP_SIZE].IsBlocking() &&
-					mapa[u.pos.x+(u.pos.y+dir_change[new_dir].y)*MAP_SIZE].IsBlocking())
+				if(mapa[u.pos.x+dir_change[new_dir].x+u.pos.y*MAP_W].IsBlocking() &&
+					mapa[u.pos.x+(u.pos.y+dir_change[new_dir].y)*MAP_W].IsBlocking())
 					return false;
 			}
 
 			u.dir = new_dir;
 			u.moving = true;
 			u.move_progress = 0.f;
-			mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE].unit = u._ref;
+			mapa[u.new_pos.x+u.new_pos.y*MAP_W].unit = u._ref;
 			return true;
 		}
 	}
@@ -814,10 +861,10 @@ DIR GetDir(const INT2& a, const INT2& b)
 void Update(float dt)
 {
 	// selecting unit
-	INT2 tile(cursor_pos.x/32, cursor_pos.y/32);
-	if(tile.x >= 0 && tile.y >= 0 && tile.x < MAP_SIZE && tile.y < MAP_SIZE && MousePressedRelease(1))
+	INT2 tile((cursor_pos.x + cam_pos.x)/32, (cursor_pos.y + cam_pos.y)/32);
+	if(tile.x >= 0 && tile.y >= 0 && tile.x < MAP_W && tile.y < MAP_W && MousePressedRelease(1))
 	{
-		Tile& t = mapa[tile.x+tile.y*MAP_SIZE];
+		Tile& t = mapa[tile.x+tile.y*MAP_W];
 		selected = t.unit;
 	}
 
@@ -854,7 +901,7 @@ void Update(float dt)
 		else if(u.inside_building)
 		{
 			// unit inside building, press SPACE to exit
-			if(KeyPressedRelease(SDL_SCANCODE_SPACE) && !mapa[u.pos.x+u.pos.y*MAP_SIZE].unit)
+			if(KeyPressedRelease(SDL_SCANCODE_SPACE) && !mapa[u.pos.x+u.pos.y*MAP_W].unit)
 			{
 				if(!TryMove(u, DIR_S, false))
 				{
@@ -943,8 +990,8 @@ void Update(float dt)
 			if(&u == player)
 				player = NULL;
 			if(u.moving)
-				mapa[u.new_pos.x+u.new_pos.y*MAP_SIZE].unit = NULL;
-			mapa[u.pos.x+u.pos.y*MAP_SIZE].unit = NULL;
+				mapa[u.new_pos.x+u.new_pos.y*MAP_W].unit = NULL;
+			mapa[u.pos.x+u.pos.y*MAP_W].unit = NULL;
 			delete &u;
 			it = units.erase(it);
 			end = units.end();
@@ -959,9 +1006,9 @@ void Update(float dt)
 			if(u.move_progress >= 1.f)
 			{
 				u.moving = false;
-				mapa[u.pos.x+u.pos.y*MAP_SIZE].unit = NULL;
+				mapa[u.pos.x+u.pos.y*MAP_W].unit = NULL;
 				u.pos = u.new_pos;
-				Tile& tile = mapa[u.pos.x+u.pos.y*MAP_SIZE];
+				Tile& tile = mapa[u.pos.x+u.pos.y*MAP_W];
 				if(tile.building)
 				{
 					tile.unit = NULL;
@@ -1063,6 +1110,20 @@ void Update(float dt)
 				hit.pos = hit._ref->GetRef().GetPos();
 			++it;
 		}
+	}
+
+	// set camera
+	if(player)
+	{
+		cam_pos = player->GetPos() - SCREEN_SIZE/2;
+		if(cam_pos.x < 0)
+			cam_pos.x = 0;
+		if(cam_pos.y < 0)
+			cam_pos.y = 0;
+		if(cam_pos.x + SCREEN_SIZE.x > MAP_W*32)
+			cam_pos.x = MAP_W*32-SCREEN_SIZE.x;
+		if(cam_pos.y + SCREEN_SIZE.y > MAP_H*32)
+			cam_pos.y = MAP_H*32-SCREEN_SIZE.y;
 	}
 }
 

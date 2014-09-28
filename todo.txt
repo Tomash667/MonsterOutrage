@@ -1,6 +1,3 @@
-+ harder enemy
-+ scrolling map
-
 NEXT VERSION [v1]:
 + pathfinding
 + hit chance
@@ -12,6 +9,10 @@ NEXT VERSION [v1]:
 + healing depends on max hp
 + exp for attacking
 + more realistic map
++ button shortcut
++ button for cancel sleeping, dring potion
++ text about getting gold/exp
++ common function for attack
 
 NEXT VERSION [v2]:
 + blacksmith [upgrade armor, upgrade weapon]
@@ -28,7 +29,14 @@ NEXT VERSION [v3]:
 NEXT VERSION: [v4]
 + ranged combat
 + guard tower
++ hunter hero
+
+NEXT VERSION: [v5]
++ rogue guild
++ rogue hero
++ poison
++ spider
 
 IDEAS:
 + disease (decrase natural healing, slow)
-+ poison
++ minotaur - charge attack

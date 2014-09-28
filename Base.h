@@ -7,6 +7,10 @@ typedef unsigned int uint;
 #define IS_SET(flag,bit) (((flag) & (bit)) != 0)
 #define IS_ALL_SET(flag,bits) (((flag) & (bits)) == (bits))
 
+template <typename T, size_t N>
+char ( &_ArraySizeHelper( T (&array)[N] ))[N];
+#define countof( array ) (sizeof( _ArraySizeHelper( array ) ))
+
 struct INT2
 {
 	int x, y;
@@ -17,6 +21,16 @@ struct INT2
 	inline INT2 operator + (const INT2& pt) const
 	{
 		return INT2(x+pt.x, y+pt.y);
+	}
+
+	inline INT2 operator - (const INT2& pt) const
+	{
+		return INT2(x-pt.x, y-pt.y);
+	}
+
+	inline INT2 operator / (int a) const
+	{
+		return INT2(x/a, y/a);
 	}
 };
 

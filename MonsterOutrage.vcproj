@@ -61,7 +61,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="SDL2.lib SDL2main.lib SDL2_image.lib SDL2_ttf.lib"
-				OutputFile="$(ProjectDir)bin\$(ProjectName).exe"
+				OutputFile="$(ProjectDir)bin\$(ProjectName)_d.exe"
 				AdditionalLibraryDirectories="&quot;F:\lib\SDL2-2.0.3\lib\x86&quot;;&quot;F:\lib\SDL2_image-2.0.0\lib\x86&quot;;&quot;F:\lib\SDL2_ttf-2.0.12\lib\x86&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="1"
@@ -116,6 +116,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
+				AdditionalIncludeDirectories="&quot;F:\lib\SDL2-2.0.3\include&quot;;&quot;F:\lib\SDL2_image-2.0.0\include&quot;;&quot;F:\lib\SDL2_ttf-2.0.12\include&quot;"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -132,7 +133,11 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalDependencies="SDL2.lib SDL2main.lib SDL2_image.lib SDL2_ttf.lib"
+				OutputFile="$(ProjectDir)bin\$(ProjectName).exe"
+				AdditionalLibraryDirectories="&quot;F:\lib\SDL2-2.0.3\lib\x86&quot;;&quot;F:\lib\SDL2_image-2.0.0\lib\x86&quot;;&quot;F:\lib\SDL2_ttf-2.0.12\lib\x86&quot;"
 				GenerateDebugInformation="true"
+				SubSystem="1"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
 				TargetMachine="1"

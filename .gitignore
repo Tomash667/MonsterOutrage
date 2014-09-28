@@ -6,3 +6,6 @@
 /bin/*.exe
 /*.ncb
 /*.suo
+/Release
+/bin/readme.txt
+/pak
