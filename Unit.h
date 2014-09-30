@@ -107,9 +107,10 @@ struct Unit
 	INT2 pos, new_pos;
 	DIR dir;
 	float move_progress, waiting, attack_timer;
-	bool moving, alive, is_player, inside_building;
+	bool moving, alive, is_player;
+	Building* inside_building;
 
-	Unit(/*const*/ BaseUnit* base) : moving(false), waiting(0.f), alive(true), is_player(false), base(base), hp(base->hp), gold(random(base->gold)), inside_building(false), attack_timer(0.f)
+	Unit(/*const*/ BaseUnit* base) : moving(false), waiting(0.f), alive(true), is_player(false), base(base), hp(base->hp), gold(random(base->gold)), inside_building(NULL), attack_timer(0.f)
 	{
 		_ref = RefTable.Add(this);
 	}

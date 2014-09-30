@@ -67,9 +67,9 @@ vector<Hit> hits;
 Player* player;
 UnitRef* selected;
 Text text[4];
-Building* inn;
 vector<AAction> a_actions;
 UnitRefTable RefTable;
+vector<Building*> buildings;
 
 bool ActionPred(const AAction& a, const AAction& b)
 {
@@ -115,7 +115,7 @@ void InitSDL()
 	if(SDL_Init(SDL_INIT_VIDEO) < 0)
 		throw Format("ERROR: Failed to initialize SDL (%d).", SDL_GetError());
 
-	window = SDL_CreateWindow("Monster Outrage v 0", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1024, 768, SDL_WINDOW_SHOWN);
+	window = SDL_CreateWindow(Format("Monster Outrage v %d", VERSION), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1024, 768, SDL_WINDOW_SHOWN);
 	if(!window)
 		throw Format("ERROR: Failed to create window (%d).", SDL_GetError());
 
@@ -268,6 +268,7 @@ void InitGame()
 
 	Building* b = new Building;
 	b->base = &base_buildings[0];
+	buildings.push_back(b);
 	M(5,1).PutBuilding(b, BT_WALL);
 	M(6,1).PutBuilding(b, BT_SIGN);
 	M(7,1).PutBuilding(b, BT_WALL);
@@ -276,7 +277,17 @@ void InitGame()
 	M(7,2).PutBuilding(b, BT_WALL);
 	M(6,3).type = 0;
 
-	inn = b;
+	// marketplace
+	b = new Building;
+	b->base = &base_buildings[1];
+	buildings.push_back(b);
+	M(10,1).PutBuilding(b, BT_WALL);
+	M(11,1).PutBuilding(b, BT_SIGN);
+	M(12,1).PutBuilding(b, BT_WALL);
+	M(10,2).PutBuilding(b, BT_WALL);
+	M(11,2).PutBuilding(b, BT_DOOR);
+	M(12,2).PutBuilding(b, BT_WALL);
+	M(11,3).type = 0;
 
 	// text width
 	text[0].w = 300;
@@ -285,13 +296,13 @@ void InitGame()
 	text[3].w = 600;
 
 	// available actions
-	a_actions.push_back(AAction(Action_UsePotion, AS_ITEM));
+	a_actions.push_back(AAction(Action_DrinkPotion, AS_ITEM));
 }
 
 //=============================================================================
 void CleanGame()
 {
-	delete inn;
+	DeleteElements(buildings);
 	DeleteElements(units);
 }
 
@@ -342,8 +353,8 @@ void Draw()
 					r4.y = wall_offset.y*32;
 					SDL_RenderCopy(renderer, tBuilding, &r4, &r);
 					const INT2& offset = tile.building->base->offset;
-					r4.x = offset.x*32;
-					r4.y = offset.y*32;
+					r4.x = offset.x;
+					r4.y = offset.y;
 				}
 				SDL_RenderCopy(renderer, tBuilding, &r4, &r);
 			}
@@ -472,7 +483,7 @@ void Draw()
 	if(player && player->alive && player->inside_building)
 	{
 		// text
-		text[2].Set(Format("Inside building: %s", inn->base->name));
+		text[2].Set(Format("Inside building: %s", player->inside_building->base->name));
 		SDL_QueryTexture(text[2].tex, NULL, NULL, &r.w, &r.h);
 		r.x = 32;
 		r.y = 672;
@@ -535,7 +546,7 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 			{
 				if(u.is_player)
 					RemoveActionSource(AS_BUILDING);
-				u.inside_building = false;
+				u.inside_building = NULL;
 			}
 			mapa[u.new_pos.x+u.new_pos.y*MAP_W].unit = u._ref;
 			return true;
@@ -644,6 +655,25 @@ DIR GetDirKey()
 }
 
 //=============================================================================
+void TryExitBuilding()
+{
+	Unit& u = *player;
+	if(!TryMove(u, DIR_S, false))
+	{
+		if(rand()%2 == 0)
+		{
+			if(!TryMove(u, DIR_SW, false))
+				TryMove(u, DIR_SE, false);
+		}
+		else
+		{
+			if(!TryMove(u, DIR_SE, false))
+				TryMove(u, DIR_SW, false);
+		}
+	}
+}
+
+//=============================================================================
 void DoAction(ActionId id)
 {
 	const Action& a = actions[id];
@@ -662,10 +692,46 @@ void DoAction(ActionId id)
 			SortActions();
 		}
 		break;
-	case Action_UsePotion:
+	case Action_DrinkPotion:
+		if(player->action == PA_None)
+		{
+			player->action = PA_DrinkPotion;
+			player->action_time = 0.f;
+			player->action_time_max = 1.f;
+			a_actions.push_back(AAction(Action_Cancel, AS_GENERIC));
+			SortActions();
+		}
+		break;
 	case Action_BuyBeer:
+		if(player->action == PA_None && player->gold >= 3)
+		{
+			player->gold -= 3;
+			player->action = PA_DrinkBeer;
+			player->action_time = 0.f;
+			player->action_time_max = 10;
+			a_actions.push_back(AAction(Action_Cancel, AS_GENERIC));
+			SortActions();
+		}
+		break;
 	case Action_Exit:
+		TryExitBuilding();
+		break;
 	case Action_Cancel:
+		player->action = PA_None;
+		RemoveAction(Action_Cancel);
+		break;
+	case Action_BuyPotion:
+		if(player->action == PA_None && player->gold >= 20)
+		{
+			player->gold -= 20;
+			++player->potions;
+			if(player->potions == 1)
+			{
+				a_actions.push_back(AAction(Action_DrinkPotion, AS_ITEM));
+				SortActions();
+			}
+		}
+		break;
 	default:
 		break;
 	}
@@ -722,6 +788,15 @@ void Update(float dt)
 			player->action_time += dt;
 			if(player->action_time >= player->action_time_max)
 			{
+				if(player->action == PA_DrinkPotion)
+				{
+					player->hp += 50;
+					if(player->hp >= player->base->hp)
+						player->hp = player->base->hp;
+					--player->potions;
+					if(player->potions == 0)
+						RemoveAction(Action_DrinkPotion);
+				}
 				player->action = PA_None;
 				RemoveAction(Action_Cancel);
 			}
@@ -732,21 +807,7 @@ void Update(float dt)
 			if(!mapa[u.pos.x+u.pos.y*MAP_W].unit)
 			{
 				if(KeyPressedRelease(SDL_SCANCODE_SPACE) || KeyPressedRelease(SDL_SCANCODE_KP_5))
-				{
-					if(!TryMove(u, DIR_S, false))
-					{
-						if(rand()%2 == 0)
-						{
-							if(!TryMove(u, DIR_SW, false))
-								TryMove(u, DIR_SE, false);
-						}
-						else
-						{
-							if(!TryMove(u, DIR_SE, false))
-								TryMove(u, DIR_SW, false);
-						}
-					}
-				}
+					TryExitBuilding();
 				else
 				{
 					DIR dir = GetDirKey();
@@ -795,7 +856,7 @@ void Update(float dt)
 				if(tile.building)
 				{
 					tile.unit = NULL;
-					u.inside_building = true;
+					u.inside_building = tile.building;
 					a_actions.push_back(AAction(Action_Exit, AS_BUILDING));
 					const BaseBuilding& base = *tile.building->base;
 					for(int i=0; i<BaseBuilding::MAX_ACTIONS; ++i)

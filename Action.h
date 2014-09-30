@@ -6,7 +6,7 @@ enum ActionId
 	Action_Cancel,
 	Action_BuyBeer,
 	Action_Exit,
-	Action_UsePotion,
+	Action_DrinkPotion,
 	Action_BuyPotion,
 	Action_Invalid
 };
