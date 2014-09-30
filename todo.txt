@@ -1,21 +1,23 @@
++ exit button
 + pathfinding
 + hit chance
 + friendly guards
 + marketplace [potion]
 + selectable buildings with description
-+ text about healing
 + healing depends on max hp
 + exp for attacking
 + more realistic map
 + button shortcut
-+ button for cancel sleeping, dring potion
++ button for cancel sleeping, drinking potion
 + text about getting gold/exp
 + common function for attack
++ drink beer in inn
 
 NEXT VERSION [v2]:
 + blacksmith [upgrade armor, upgrade weapon]
 + castle [spawn guards]
 + enemy spawn building
++ menu, saving, loading
 
 NEXT VERSION [v3]:
 + building damage, repair
@@ -23,6 +25,8 @@ NEXT VERSION [v3]:
 + other warriors
 + sharing gold reward, experience
 + workers
++ playing as kingdom
++ putting reward on monsters, buildings
 
 NEXT VERSION: [v4]
 + ranged combat

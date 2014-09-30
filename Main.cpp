@@ -1,5 +1,10 @@
 #include "Pch.h"
 #include "Input.h"
+#include "Common.h"
+#include "Building.h"
+#include "Unit.h"
+#include "Player.h"
+#include "Tile.h"
 
 const int VERSION = 1;
 const int MAP_W = 20;
@@ -7,323 +12,11 @@ const int MAP_H = 61;
 const int TAX = 10;
 const INT2 SCREEN_SIZE(640, 640);
 
-enum DIR
-{
-	DIR_S,
-	DIR_SW,
-	DIR_W,
-	DIR_NW,
-	DIR_N,
-	DIR_NE,
-	DIR_E,
-	DIR_SE,
-	DIR_INVALID
-};
-
-INT2 dir_change[] = {
-	INT2(0,1),
-	INT2(-1,1),
-	INT2(-1,0),
-	INT2(-1,-1),
-	INT2(0,-1),
-	INT2(1,-1),
-	INT2(1,0),
-	INT2(1,1),
-	INT2(0,0)
-};
-
 SDL_Window* window;
 SDL_Renderer* renderer;
 
-inline int Distance(const INT2& a, const INT2& b)
-{
-	int dist_x = abs(a.x - b.x),
-		dist_y = abs(a.y - b.y);
-	int smal = min(dist_x, dist_y);
-	return smal*15 + (max(dist_x, dist_y)-smal)*10;
-}
-
-struct TileType
-{
-	SDL_Rect rect;
-	bool block;
-};
-
 SDL_Texture* tTiles, *tUnit, *tHpBar, *tHit, *tSelected, *tBuilding, *tButton;
 TTF_Font* font;
-TileType tiles[3] = {
-	0, 0, 32, 32, false,
-	32, 0, 32, 32, true,
-	0, 32, 32, 32, false
-};
-INT2 wall_offset(0,0), door_offset(1,0);
-
-struct BaseUnit
-{
-	cstring name;
-	int lvl, hp, attack, defense;
-	float move_speed, attack_speed;
-	INT2 offset, gold;
-};
-
-// this should be const but temporary we edit hero stats upon level up
-/*const*/ BaseUnit base_units[] = {
-	"Hero", 1, 100, 40, 5, 5.f, 1.f, INT2(0,0), INT2(0,0),
-	"Goblin", 1, 50, 12, 0, 6.f, 1.2f, INT2(1,0), INT2(10,20),
-	"Orc", 2, 75, 20, 5, 5.f, 0.9f, INT2(0,1), INT2(25,50),
-	"Minotaur", 3, 120, 30, 10, 4.f, 0.95f, INT2(1,1), INT2(65,80)
-};
-
-struct BaseBuilding
-{
-	cstring name;
-	INT2 offset;
-};
-
-const BaseBuilding base_buildings[] = {
-	"Inn", INT2(0,1)
-};
-
-struct Unit;
-
-struct UnitRef
-{
-	Unit* unit;
-	uint refs;
-
-	UnitRef() : unit(NULL), refs(0)
-	{
-
-	}
-
-	inline Unit& GetRef()
-	{
-		assert(unit);
-		return *unit;
-	}
-};
-
-struct UnitRefTable
-{
-	uint last_index;
-	vector<uint> empty_ids;
-	vector<UnitRef> refs;
-
-	inline void Init()
-	{
-		last_index = 0;
-		refs.resize(64);
-	}
-
-	inline UnitRef* Add(Unit* u)
-	{
-		assert(u);
-		UnitRef* _ref;
-		if(!empty_ids.empty())
-		{
-			uint id = empty_ids.back();
-			empty_ids.pop_back();
-			_ref = &refs[id];
-		}
-		else
-		{
-			if(last_index >= 64u)
-				throw "ERROR: No space in UnitRefTable!";
-			_ref = &refs[last_index];
-			++last_index;
-		}
-		_ref->unit = u;
-		_ref->refs = 1;
-		return _ref;
-	}
-
-	inline void Remove(UnitRef* _ref)
-	{
-		assert(_ref);
-		--_ref->refs;
-		assert(_ref->refs > 0 || !_ref->unit);
-		if(_ref->refs == 0)
-			empty_ids.push_back(GetIndex(_ref));
-	}
-
-	inline void Delete(UnitRef* _ref)
-	{
-		assert(_ref);
-		_ref->unit = NULL;
-		--_ref->refs;
-		if(_ref->refs == 0)
-			empty_ids.push_back(GetIndex(_ref));
-	}
-
-	inline uint GetIndex(UnitRef* _ref)
-	{
-		assert(_ref);
-		int index = _ref - &refs[0];
-		assert(index >= 0 && index < (int)last_index && &refs[index] == _ref);
-		return (uint)index;
-	}
-
-} RefTable;
-
-inline bool CheckRef(UnitRef*& _ref)
-{
-	if(!_ref)
-		return false;
-	else if(_ref->unit)
-		return true;
-	else
-	{
-		RefTable.Remove(_ref);
-		_ref = NULL;
-		return false;
-	}
-}
-
-struct Unit
-{
-	/*const*/ BaseUnit* base;
-	UnitRef* _ref;
-	int hp, gold;
-	INT2 pos, new_pos;
-	DIR dir;
-	float move_progress, waiting, attack_timer;
-	bool moving, alive, is_player, inside_building;
-
-	Unit(/*const*/ BaseUnit* base) : moving(false), waiting(0.f), alive(true), is_player(false), base(base), hp(base->hp), gold(random(base->gold)), inside_building(false), attack_timer(0.f)
-	{
-		_ref = RefTable.Add(this);
-	}
-
-	virtual ~Unit()
-	{
-		RefTable.Delete(_ref);
-	}
-
-	inline INT2 GetPos() const
-	{
-		INT2 pt;
-		if(moving)
-		{
-			pt.x = pos.x*32+int(move_progress*32*dir_change[dir].x);
-			pt.y = pos.y*32+int(move_progress*32*dir_change[dir].y);
-		}
-		else
-		{
-			pt.x = pos.x*32;
-			pt.y = pos.y*32;
-		}
-		return pt;
-	}
-
-	virtual inline cstring GetText() const
-	{
-		return Format("%s  Hp: %d/%d\nAttack: %d  Defense: %d\nSpeed: %g / %g\nGold: %d", base->name, hp, base->hp, base->attack, base->defense, base->move_speed, base->attack_speed, gold);
-	}
-};
-
-struct Player : public Unit
-{
-	int lvl, exp, need_exp, untaxed_gold;
-	bool sleeping;
-	float sleeping_progress;
-
-	Player() : Unit(&base_units[0]), exp(0), untaxed_gold(0), lvl(1), need_exp(100), sleeping(false)
-	{
-		gold = 100;
-		is_player = true;
-	}
-
-	virtual inline cstring GetText() const
-	{
-		return Format("%s  Hp: %d/%d\nLvl: %d   Exp: %d/%d\nAttack: %d  Defense: %d\nSpeed: %g / %g\nGold: %d (%d)", base->name, hp, base->hp, lvl, exp, need_exp, base->attack, base->defense,
-			base->move_speed, base->attack_speed, gold, untaxed_gold);
-	}
-
-	inline void AddExp(int exp_lvl)
-	{
-		if(exp_lvl > lvl)
-			exp_lvl += (exp_lvl-lvl);
-		else if(exp_lvl < lvl)
-			exp_lvl -= (lvl-exp_lvl);
-		if(exp_lvl > 0)
-			exp += exp_lvl*50;
-		else
-		{
-			switch(exp_lvl)
-			{
-			case 0:
-				exp += 25;
-				break;
-			case -1:
-				exp += 12;
-				break;
-			case -2:
-				exp += 6;
-				break;
-			case -3:
-				exp += 3;
-				break;
-			case -4:
-				++exp;
-				break;
-			default:
-				return;
-			}
-		}
-		while(exp >= need_exp)
-		{
-			exp -= need_exp;
-			need_exp += 100;
-			base->hp += 10;
-			hp += 10;
-			base->attack += 4;
-			++base->defense;
-			++lvl;
-		}
-	}
-};
-
-struct Building
-{
-	const BaseBuilding* base;
-};
-
-enum BuildingTile
-{
-	BT_WALL,
-	BT_DOOR,
-	BT_SIGN
-};
-
-struct Tile
-{
-	UnitRef* unit;
-	int type;
-	struct 
-	{
-		Building* building;
-		BuildingTile building_tile;
-	};
-
-	inline bool IsBlocking(bool is_player=false) const
-	{
-		if(building)
-		{
-			if(building_tile == BT_DOOR)
-				return !is_player;
-			return true;
-		}
-		else
-			return tiles[type].block;
-	}
-
-	inline void PutBuilding(Building* b, BuildingTile bt)
-	{
-		assert(b);
-		building = b;
-		building_tile = bt;
-	}
-};
 
 struct Hit
 {
@@ -375,6 +68,44 @@ Player* player;
 UnitRef* selected;
 Text text[4];
 Building* inn;
+vector<AAction> a_actions;
+UnitRefTable RefTable;
+
+bool ActionPred(const AAction& a, const AAction& b)
+{
+	return actions[a.id].priority > actions[b.id].priority;
+}
+
+void SortActions()
+{
+	std::sort(a_actions.begin(), a_actions.end(), ActionPred);
+}
+
+void RemoveAction(ActionId id)
+{
+	for(vector<AAction>::iterator it = a_actions.begin(), end = a_actions.end(); it != end; ++it)
+	{
+		if(it->id == id)
+		{
+			a_actions.erase(it);
+			break;
+		}
+	}
+}
+
+void RemoveActionSource(ActionSource source)
+{
+	for(vector<AAction>::iterator it = a_actions.begin(), end = a_actions.end(); it != end;)
+	{
+		if(it->source == source)
+		{
+			it = a_actions.erase(it);
+			end = a_actions.end();
+		}
+		else
+			++it;
+	}
+}
 
 //=============================================================================
 void InitSDL()
@@ -552,6 +283,9 @@ void InitGame()
 	text[1].w = 300;
 	text[2].w = 600;
 	text[3].w = 600;
+
+	// available actions
+	a_actions.push_back(AAction(Action_UsePotion, AS_ITEM));
 }
 
 //=============================================================================
@@ -704,6 +438,36 @@ void Draw()
 		SDL_RenderCopy(renderer, text[1].tex, NULL, &r);
 	}
 
+	// actions
+	if(!a_actions.empty())
+	{
+		r.x = 32;
+		r.y = 700;
+		r.w = 16;
+		r.h = 16;
+		r4.w = 16;
+		r4.h = 16;
+
+		for(vector<AAction>::iterator it = a_actions.begin(), end = a_actions.end(); it != end; ++it)
+		{
+			const Action& a = actions[it->id];
+			r4.x = a.offset.x;
+			r4.y = a.offset.y;
+			SDL_RenderCopy(renderer, tButton, &r4, &r);
+
+			if(cursor_pos.x >= r.x && cursor_pos.x < r.x+16 && cursor_pos.y >= r.y && cursor_pos.y < r.y+16)
+			{
+				text[3].Set(a.desc);
+				SDL_Rect r5;
+				r5.x = 32;
+				r5.y = 728;
+				SDL_QueryTexture(text[3].tex, NULL, NULL, &r5.w, &r5.h);
+				SDL_RenderCopy(renderer, text[3].tex, NULL, &r5);
+			}
+			r.x += 16;
+		}
+	}
+
 	// building
 	if(player && player->alive && player->inside_building)
 	{
@@ -713,33 +477,6 @@ void Draw()
 		r.x = 32;
 		r.y = 672;
 		SDL_RenderCopy(renderer, text[2].tex, NULL, &r);
-
-		// button
-		r.x = 32;
-		r.y = 700;
-		r.w = 16;
-		r.h = 16;
-		r4.x = 0;
-		r4.y = 0;
-		r4.w = 16;
-		r4.h = 16;
-		SDL_RenderCopy(renderer, tButton, &r4, &r);
-
-		// button text
-		bool draw_text = false;
-		if(cursor_pos.x >= 32 && cursor_pos.y >= 700 && cursor_pos.x < 32+16 && cursor_pos.y < 700+16)
-		{
-			draw_text = true;
-			text[3].Set("Sleep inside inn for 10 gp.");
-		}
-
-		if(draw_text)
-		{
-			SDL_QueryTexture(text[3].tex, NULL, NULL, &r.w, &r.h);
-			r.x = 32;
-			r.y = 728;
-			SDL_RenderCopy(renderer, text[3].tex, NULL, &r);
-		}
 	}
 
 	// display render
@@ -794,7 +531,12 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 			u.dir = new_dir;
 			u.moving = true;
 			u.move_progress = 0.f;
-			u.inside_building = false;
+			if(u.inside_building)
+			{
+				if(u.is_player)
+					RemoveActionSource(AS_BUILDING);
+				u.inside_building = false;
+			}
 			mapa[u.new_pos.x+u.new_pos.y*MAP_W].unit = u._ref;
 			return true;
 		}
@@ -902,6 +644,34 @@ DIR GetDirKey()
 }
 
 //=============================================================================
+void DoAction(ActionId id)
+{
+	const Action& a = actions[id];
+
+	switch(id)
+	{
+	case Action_Sleep:
+		if(player->action == PA_None && player->gold >= 10 && player->hp != player->base->hp)
+		{
+			player->gold -= 10;
+			player->action = PA_Sleep;
+			player->action_time = 0.f;
+			player->action_time_max = float((player->base->hp - player->hp)/5+1);
+			player->action_progress = 0.f;
+			a_actions.push_back(AAction(Action_Cancel, AS_GENERIC));
+			SortActions();
+		}
+		break;
+	case Action_UsePotion:
+	case Action_BuyBeer:
+	case Action_Exit:
+	case Action_Cancel:
+	default:
+		break;
+	}
+}
+
+//=============================================================================
 void Update(float dt)
 {
 	// selecting unit
@@ -913,13 +683,18 @@ void Update(float dt)
 	}
 
 	// sleep button
-	if(player && player->alive && player->inside_building && cursor_pos.x >= 32 && cursor_pos.y >= 700 && cursor_pos.x < 32+16 && cursor_pos.y < 700+16 && MousePressedRelease(1))
+	if(player && player->alive && !a_actions.empty())
 	{
-		if(player->gold >= 10 && !player->sleeping && player->hp != player->base->hp)
+		INT2 pt(32,700);
+		for(vector<AAction>::iterator it = a_actions.begin(), end = a_actions.end(); it != end; ++it)
 		{
-			player->gold -= 10;
-			player->sleeping = true;
-			player->sleeping_progress = 0.f;
+			if(cursor_pos.x >= pt.x && cursor_pos.y >= pt.y && cursor_pos.x < pt.x+16 && cursor_pos.y < pt.y+16)
+			{
+				if(MousePressedRelease(1))
+					DoAction(it->id);
+				break;
+			}
+			pt.x += 16;
 		}
 	}
 
@@ -928,18 +703,27 @@ void Update(float dt)
 	{
 		Unit& u = *player;
 
-		if(player->sleeping)
+		if(player->action != PA_None)
 		{
-			player->sleeping_progress += dt;
-			if(player->sleeping_progress >= 1.f)
+			switch(player->action)
 			{
-				player->hp += 5;
-				player->sleeping_progress = 0.f;
-				if(player->hp >= player->base->hp)
+			case PA_Sleep:
+				player->action_progress += dt;
+				if(player->action_progress >= 1.f)
 				{
-					player->hp = player->base->hp;
-					player->sleeping = false;
+					player->hp += 5;
+					player->action_progress -= 1.f;
+					if(player->hp >= player->base->hp)
+						player->hp = player->base->hp;
 				}
+				break;
+			}
+			
+			player->action_time += dt;
+			if(player->action_time >= player->action_time_max)
+			{
+				player->action = PA_None;
+				RemoveAction(Action_Cancel);
 			}
 		}
 		else if(u.inside_building)
@@ -1012,6 +796,15 @@ void Update(float dt)
 				{
 					tile.unit = NULL;
 					u.inside_building = true;
+					a_actions.push_back(AAction(Action_Exit, AS_BUILDING));
+					const BaseBuilding& base = *tile.building->base;
+					for(int i=0; i<BaseBuilding::MAX_ACTIONS; ++i)
+					{
+						if(base.actions[i] != Action_Invalid)
+							a_actions.push_back(AAction(base.actions[i], AS_BUILDING));
+					}
+					SortActions();
+
 					if(player->untaxed_gold)
 					{
 						int tax = player->untaxed_gold*TAX/100;

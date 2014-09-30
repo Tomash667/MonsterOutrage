@@ -174,7 +174,19 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
+				RelativePath=".\Action.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\Base.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\BaseBuilding.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\BaseUnit.cpp"
 				>
 			</File>
 			<File
@@ -204,11 +216,31 @@
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
 			<File
+				RelativePath=".\Action.h"
+				>
+			</File>
+			<File
 				RelativePath=".\Base.h"
 				>
 			</File>
 			<File
+				RelativePath=".\BaseBuilding.h"
+				>
+			</File>
+			<File
+				RelativePath=".\BaseUnit.h"
+				>
+			</File>
+			<File
+				RelativePath=".\Building.h"
+				>
+			</File>
+			<File
 				RelativePath=".\Class.h"
+				>
+			</File>
+			<File
+				RelativePath=".\Common.h"
 				>
 			</File>
 			<File
@@ -217,6 +249,14 @@
 			</File>
 			<File
 				RelativePath=".\Pch.h"
+				>
+			</File>
+			<File
+				RelativePath=".\Player.h"
+				>
+			</File>
+			<File
+				RelativePath=".\Tile.h"
 				>
 			</File>
 			<File
