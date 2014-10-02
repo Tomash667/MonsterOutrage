@@ -14,10 +14,17 @@ const TileType tiles[3] = {
 
 const INT2 wall_offset(0,0), door_offset(1,0);
 
+enum TileId
+{
+	Grass,
+	Block,
+	Dirt
+};
+
 struct Tile
 {
 	UnitRef* unit;
-	int type;
+	TileId type;
 	struct 
 	{
 		Building* building;
@@ -41,5 +48,11 @@ struct Tile
 		assert(b);
 		building = b;
 		building_tile = bt;
+	}
+
+	inline void Unblock()
+	{
+		if(type == Block)
+			type = (rand()%2 == 0 ? Grass : Dirt);
 	}
 };

@@ -1,29 +1,32 @@
 + pathfinding
-+ friendly guards
 + healing depends on max hp
 + exp for attacking
 + more realistic map
 + button shortcut
 + text about getting gold/exp
 + required experience like in majesty
++ ai idle walking
 
 NEXT VERSION [v2]:
 + blacksmith [upgrade armor, upgrade weapon]
 + castle [spawn guards]
-+ enemy spawn building
++ enemy [rat, bear]
++ enemy spawn building [rat cave]
 + menu, saving, loading
 + marketplace lvl 2 [ring of protection]
 + better calculate experience while gaining level
++ ai patrol
 
 NEXT VERSION [v3]:
 + building damage, repair
 + warriors guild
 + other warriors
 + sharing gold reward, experience
-+ workers
++ workers, tax collector
 + playing as kingdom
 + putting reward on monsters, buildings
 + buildings [castle, house]
++ ai guard buildings, repair buildings, collect tax
 
 NEXT VERSION: [v4]
 + ranged combat

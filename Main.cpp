@@ -14,6 +14,7 @@ const INT2 SCREEN_SIZE(640, 640);
 
 SDL_Window* window;
 SDL_Renderer* renderer;
+bool quit_game;
 
 SDL_Texture* tTiles, *tUnit, *tHpBar, *tHit, *tSelected, *tBuilding, *tButton;
 TTF_Font* font;
@@ -196,6 +197,7 @@ void InitGame()
 {
 	RefTable.Init();
 	srand((uint)time(NULL));
+#define M(x,y) mapa[(x)+(y)*MAP_W]
 
 	// map
 	for(int i=0; i<MAP_W*MAP_H; ++i)
@@ -205,19 +207,43 @@ void InitGame()
 		tile.unit = NULL;
 		tile.building = NULL;
 		if(c == 0)
-			tile.type = 1;
+			tile.type = Block;
 		else if(c == 1 || c == 2)
-			tile.type = 2;
+			tile.type = Dirt;
 		else
-			tile.type = 0;
+			tile.type = Grass;
 	}
 	
 	// player
-	player = new Player;
-	player->pos = INT2(0,0);
-	units.push_back(player);
-	mapa[0].type = 0;
-	mapa[0].unit = player->_ref;
+	{
+		player = new Player;
+		player->pos = INT2(0,0);
+		units.push_back(player);
+		Tile& tile = M(0,0);
+		tile.Unblock();
+		tile.unit = player->_ref;
+
+		// unblock tiles around player
+		M(1,0).Unblock();
+		M(0,1).Unblock();
+		M(1,1).Unblock();
+	}
+
+	// guards
+	const INT2 gp[3] = {
+		INT2(6,4),
+		INT2(11,4),
+		INT2(9,5)
+	};
+	for(int i=0; i<3; ++i)
+	{
+		Unit* u = new Unit(&base_units[4]);
+		u->pos = gp[i];
+		units.push_back(u);
+		Tile& tile = mapa[u->pos.x+u->pos.y*MAP_W];
+		tile.unit = u->_ref;
+		tile.Unblock();
+	}
 
 	// enemies
 	struct SpawnGroup
@@ -252,7 +278,7 @@ void InitGame()
 				if(group.drop)
 					pt.y += random(-group.drop, group.drop);
 				Tile& tile = mapa[pt.x+pt.y*MAP_W];
-				if(tile.type != 1 && !tile.unit)
+				if(!tile.IsBlocking() && !tile.unit)
 				{
 					--enemy_count;
 					Unit* enemy = new Unit(&base_units[j+1]);
@@ -265,8 +291,6 @@ void InitGame()
 	}
 	
 	// inn
-#define M(x,y) mapa[(x)+(y)*MAP_W]
-
 	Building* b = new Building;
 	b->base = &base_buildings[0];
 	b->pt = INT2(5,1);
@@ -277,7 +301,7 @@ void InitGame()
 	M(5,2).PutBuilding(b, BT_WALL);
 	M(6,2).PutBuilding(b, BT_DOOR);
 	M(7,2).PutBuilding(b, BT_WALL);
-	M(6,3).type = 0;
+	M(6,3).Unblock();
 
 	// marketplace
 	b = new Building;
@@ -290,7 +314,7 @@ void InitGame()
 	M(10,2).PutBuilding(b, BT_WALL);
 	M(11,2).PutBuilding(b, BT_DOOR);
 	M(12,2).PutBuilding(b, BT_WALL);
-	M(11,3).type = 0;
+	M(11,3).Unblock();
 
 	// text width
 	text[0].w = 300;
@@ -582,10 +606,14 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 		{
 			if(CheckRef(tile.unit) && attack && tile.unit->GetRef().alive)
 			{
-				// attack
-				if(u.attack_timer <= 0.f)
+				Unit& target = tile.unit->GetRef();
+				if(target.alive && target.base->monster && u.attack_timer <= 0.f)
+				{
 					DoAttack(u, tile.unit->GetRef());
-				return true;
+					return true;
+				}
+				else
+					return false;
 			}
 			else
 				return false;
@@ -798,8 +826,56 @@ void DoAction(ActionId id)
 }
 
 //=============================================================================
+Unit* FindEnemy(Unit& u, INT2& tile, int& dist)
+{
+	dist = INT_MAX;
+	Unit* best_unit = NULL;
+
+	for(vector<Unit*>::iterator it = units.begin(), end = units.end(); it != end; ++it)
+	{
+		Unit& target = **it;
+		if(target.base->monster != u.base->monster)
+		{
+			INT2 pt;
+			int new_dist = GetClosestPoint(u.pos, target, pt);
+			if(dist > new_dist)
+			{
+				dist = new_dist;
+				best_unit = &target;
+				tile = pt;
+			}
+		}
+	}
+
+	return best_unit;
+}
+
+//=============================================================================
 void Update(float dt)
 {
+	// quit
+	if(KeyPressedRelease(SDL_SCANCODE_ESCAPE))
+	{
+		quit_game = true;
+		return;
+	}
+
+	// action buttons
+	if(player && player->alive && !a_actions.empty())
+	{
+		INT2 pt(32,700);
+		for(vector<AAction>::iterator it = a_actions.begin(), end = a_actions.end(); it != end; ++it)
+		{
+			if(cursor_pos.x >= pt.x && cursor_pos.y >= pt.y && cursor_pos.x < pt.x+16 && cursor_pos.y < pt.y+16)
+			{
+				if(MousePressedRelease(1))
+					DoAction(it->id);
+				break;
+			}
+			pt.x += 16;
+		}
+	}
+
 	// selecting unit
 	INT2 tile((cursor_pos.x + cam_pos.x)/32, (cursor_pos.y + cam_pos.y)/32);
 	if(tile.x >= 0 && tile.y >= 0 && tile.x < MAP_W && tile.y < MAP_H && MousePressedRelease(1))
@@ -814,22 +890,6 @@ void Update(float dt)
 		{
 			selected = t.unit;
 			selected_building = NULL;
-		}
-	}
-
-	// sleep button
-	if(player && player->alive && !a_actions.empty())
-	{
-		INT2 pt(32,700);
-		for(vector<AAction>::iterator it = a_actions.begin(), end = a_actions.end(); it != end; ++it)
-		{
-			if(cursor_pos.x >= pt.x && cursor_pos.y >= pt.y && cursor_pos.x < pt.x+16 && cursor_pos.y < pt.y+16)
-			{
-				if(MousePressedRelease(1))
-					DoAction(it->id);
-				break;
-			}
-			pt.x += 16;
 		}
 	}
 
@@ -945,17 +1005,18 @@ void Update(float dt)
 				}
 			}
 		}
-		else if(&u != player && player && player->alive && !player->inside_building)
+		else if(&u != player)
 		{
 			INT2 enemy_pt;
-			int dist = GetClosestPoint(u.pos, *player, enemy_pt);
-			if(dist <= 50)
+			int dist;
+			Unit* enemy = FindEnemy(u, enemy_pt, dist);
+			if(enemy && dist <= 50)
 			{
 				if(dist <= 15)
 				{
 					// in attack range
 					if(u.attack_timer <= 0.f)
-						DoAttack(u, *player);
+						DoAttack(u, *enemy);
 				}
 				else
 				{
@@ -1045,17 +1106,16 @@ int main(int argc, char *argv[])
 		LoadMedia();
 		InitGame();
 
-		bool quit = false;
 		uint ticks = SDL_GetTicks();
 
-		while(!quit)
+		while(!quit_game)
 		{
 			// handle events
 			SDL_Event e;
 			while(SDL_PollEvent(&e) != 0)
 			{
 				if(e.type == SDL_QUIT)
-					quit = true;
+					quit_game = true;
 				else if(e.type == SDL_KEYDOWN)
 				{
 					if(e.key.state == SDL_PRESSED)
