@@ -16,6 +16,7 @@ struct BaseBuilding
 	cstring name;
 	INT2 offset;
 	ActionId actions[MAX_ACTIONS];
+	cstring desc;
 };
 
 extern const BaseBuilding base_buildings[];

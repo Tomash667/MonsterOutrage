@@ -30,8 +30,10 @@ struct Player : public Unit
 
 	virtual inline cstring GetText() const
 	{
-		return Format("%s  Hp: %d/%d\nLvl: %d   Exp: %d/%d\nAttack: %d  Defense: %d\nSpeed: %g / %g\nGold: %d (%d)\nPotions: %d\nAction: %s%s", base->name, hp, base->hp, lvl, exp, need_exp,
-			base->attack, base->defense, base->move_speed, base->attack_speed, gold, untaxed_gold, potions, action_str[action], action != PA_None ? Format(" (%d%%)", GetProgress()) : "");
+		return Format("%s  Hp: %d/%d\nLvl: %d  Exp: %d/%d\nStr: %d  Vit: %d\nH2H: %d   Par: %d\nDmg: %d  Arm: %d\nSpeed: %g / %g\nGold: %d (%d)\nPotions: %d\nAction: %s%s",
+			base->name, hp, hpmax, lvl, exp, need_exp, strength, vitality, melee_combat, parry, 
+			CalculateDamage(), base->armor, base->move_speed, base->attack_speed, gold, untaxed_gold, potions,
+			action_str[action], action != PA_None ? Format(" (%d%%)", GetProgress()) : "");
 	}
 
 	inline int GetProgress() const
@@ -73,11 +75,14 @@ struct Player : public Unit
 		while(exp >= need_exp)
 		{
 			exp -= need_exp;
+			++melee_combat;
+			++parry;
+			if(lvl%2 == 0)
+				++strength;
 			need_exp += 100;
-			base->hp += 10;
-			hp += 10;
-			base->attack += 4;
-			++base->defense;
+			int gain = vitality/2;
+			hp += gain;
+			hpmax += gain;
 			++lvl;
 		}
 	}

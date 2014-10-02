@@ -3,10 +3,9 @@
 struct BaseUnit
 {
 	cstring name;
-	int lvl, hp, attack, defense;
+	int lvl, strength, vitality, melee_combat, parry, damage, armor;
 	float move_speed, attack_speed;
 	INT2 offset, gold;
 };
 
-// this should be const but temporary we edit hero stats upon level up
-extern /*const*/ BaseUnit base_units[];
+extern const BaseUnit base_units[];

@@ -1,13 +1,11 @@
 + pathfinding
-+ hit chance
 + friendly guards
-+ selectable buildings with description
 + healing depends on max hp
 + exp for attacking
 + more realistic map
 + button shortcut
 + text about getting gold/exp
-+ common function for attack
++ required experience like in majesty
 
 NEXT VERSION [v2]:
 + blacksmith [upgrade armor, upgrade weapon]
@@ -15,6 +13,7 @@ NEXT VERSION [v2]:
 + enemy spawn building
 + menu, saving, loading
 + marketplace lvl 2 [ring of protection]
++ better calculate experience while gaining level
 
 NEXT VERSION [v3]:
 + building damage, repair

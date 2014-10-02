@@ -101,18 +101,20 @@ inline bool CheckRef(UnitRef*& _ref)
 
 struct Unit
 {
-	/*const*/ BaseUnit* base;
+	const BaseUnit* base;
 	UnitRef* _ref;
-	int hp, gold;
+	int hp, hpmax, gold, strength, vitality, melee_combat, parry;
 	INT2 pos, new_pos;
 	DIR dir;
 	float move_progress, waiting, attack_timer;
 	bool moving, alive, is_player;
 	Building* inside_building;
 
-	Unit(/*const*/ BaseUnit* base) : moving(false), waiting(0.f), alive(true), is_player(false), base(base), hp(base->hp), gold(random(base->gold)), inside_building(NULL), attack_timer(0.f)
+	Unit(const BaseUnit* base) : moving(false), waiting(0.f), alive(true), is_player(false), base(base), gold(random(base->gold)), inside_building(NULL), attack_timer(0.f),
+		strength(base->strength), vitality(base->vitality), melee_combat(base->melee_combat), parry(base->parry)
 	{
 		_ref = RefTable.Add(this);
+		hp = hpmax = CalculateMaxHp(base->lvl);
 	}
 
 	virtual ~Unit()
@@ -138,6 +140,22 @@ struct Unit
 
 	virtual inline cstring GetText() const
 	{
-		return Format("%s  Hp: %d/%d\nAttack: %d  Defense: %d\nSpeed: %g / %g\nGold: %d", base->name, hp, base->hp, base->attack, base->defense, base->move_speed, base->attack_speed, gold);
+		return Format("%s  Hp: %d/%d\nStr: %d  Vit: %d\nH2H: %d   Par: %d\nDmg: %d  Arm: %d\nSpeed: %g / %g\nGold: %d", base->name, hp, hpmax, strength, vitality, melee_combat, parry, 
+			CalculateDamage(), base->armor, base->move_speed, base->attack_speed, gold);
+	}
+
+	int CalculateMaxHp(int lvl) const
+	{
+		return vitality+vitality*(lvl-1)/2;
+	}
+
+	int CalculateDamage() const
+	{
+		return base->damage+strength/8;
+	}
+
+	int RandomArmor() const
+	{
+		return random(base->armor/2, base->armor);
 	}
 };

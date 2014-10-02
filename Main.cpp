@@ -20,7 +20,7 @@ TTF_Font* font;
 
 struct Hit
 {
-	INT2 pos;
+	INT2 pos, offset;
 	float timer;
 	UnitRef* _ref;
 };
@@ -70,6 +70,7 @@ Text text[4];
 vector<AAction> a_actions;
 UnitRefTable RefTable;
 vector<Building*> buildings;
+Building* selected_building;
 
 bool ActionPred(const AAction& a, const AAction& b)
 {
@@ -268,6 +269,7 @@ void InitGame()
 
 	Building* b = new Building;
 	b->base = &base_buildings[0];
+	b->pt = INT2(5,1);
 	buildings.push_back(b);
 	M(5,1).PutBuilding(b, BT_WALL);
 	M(6,1).PutBuilding(b, BT_SIGN);
@@ -280,6 +282,7 @@ void InitGame()
 	// marketplace
 	b = new Building;
 	b->base = &base_buildings[1];
+	b->pt = INT2(10,1);
 	buildings.push_back(b);
 	M(10,1).PutBuilding(b, BT_WALL);
 	M(11,1).PutBuilding(b, BT_SIGN);
@@ -380,10 +383,10 @@ void Draw()
 		SDL_RenderCopy(renderer, tUnit, &rr, &r);
 		
 		// hp bar
-		if(u.hp != u.base->hp)
+		if(u.hp != u.hpmax)
 		{
 			Uint8 cr, g, b = 0;
-			float hpp = float(u.hp)/u.base->hp;
+			float hpp = float(u.hp)/u.hpmax;
 			if(hpp <= 0.5f)
 			{
 				float t = hpp*2;
@@ -398,7 +401,7 @@ void Draw()
 			}
 			SDL_SetTextureColorMod(tHpBar, cr, g, b);
 			SDL_Rect r2;
-			r2.w = int(float(u.hp)/u.base->hp*32);
+			r2.w = int(float(u.hp)/u.hpmax*32);
 			if(r2.w <= 0)
 				r2.w = 1;
 			r2.h = 2;
@@ -418,16 +421,28 @@ void Draw()
 	{
 		r.x = it->pos.x - cam_pos.x;
 		r.y = it->pos.y - cam_pos.y;
-		SDL_RenderCopy(renderer, tHit, NULL, &r);
+		r4.x = it->offset.x;
+		r4.y = it->offset.y;
+		SDL_RenderCopy(renderer, tHit, &r4, &r);
 	}
 
-	// selected unit border
+	// selection border
 	if(CheckRef(selected))
 	{
 		INT2 pos = selected->GetRef().GetPos();
 		r.x = pos.x - cam_pos.x;
 		r.y = pos.y - cam_pos.y;
 		SDL_RenderCopy(renderer, tSelected, NULL, &r);
+	}
+	else if(selected_building)
+	{
+		r.x = selected_building->pt.x*32 - cam_pos.x;
+		r.y = selected_building->pt.y*32 - cam_pos.y;
+		r.w = 96;
+		r.h = 64;
+		SDL_RenderCopy(renderer, tSelected, NULL, &r);
+		r.w = 32;
+		r.h = 32;
 	}
 
 	SDL_RenderSetViewport(renderer, NULL);
@@ -440,12 +455,19 @@ void Draw()
 	r.y = 32;
 	SDL_RenderCopy(renderer, text[0].tex, NULL, &r);
 
-	// selected unit text
+	// selection text
 	if(CheckRef(selected))
 	{
 		text[1].Set(selected->GetRef().GetText());
 		SDL_QueryTexture(text[1].tex, NULL, NULL, &r.w, &r.h);
-		r.y = 232;
+		r.y = 264;
+		SDL_RenderCopy(renderer, text[1].tex, NULL, &r);
+	}
+	else if(selected_building)
+	{
+		text[1].Set(Format("%s\n%s", selected_building->base->name, selected_building->base->desc));
+		SDL_QueryTexture(text[1].tex, NULL, NULL, &r.w, &r.h);
+		r.y = 264;
 		SDL_RenderCopy(renderer, text[1].tex, NULL, &r);
 	}
 
@@ -495,6 +517,59 @@ void Draw()
 }
 
 //=============================================================================
+void DoAttack(Unit& u, Unit& target)
+{
+	int chance = random(1,200)+u.melee_combat;
+	Hit& hit = Add1(hits);
+	hit.pos = target.GetPos();
+	hit.timer = 0.5f;
+	hit._ref = target._ref;
+	if(chance < 100+target.parry)
+	{
+		// miss / parry
+		hit.offset = INT2(0,32);
+	}
+	else
+	{
+		// hitted
+		int dmg = u.CalculateDamage() - target.RandomArmor();
+		if(dmg > 0)
+		{
+			hit.offset = INT2(0,0);
+			target.hp -= dmg;
+			if(target.hp <= 0)
+			{
+				target.alive = false;
+				if(u.is_player)
+				{
+					Player& p = (Player&)u;
+					p.untaxed_gold += target.gold;
+					player->AddExp(target.base->lvl);
+				}
+				else
+				{
+					u.gold += target.gold;
+					if(target.is_player)
+					{
+						Player& p = (Player&)target;
+						u.gold += p.untaxed_gold;
+						p.gold = 0;
+						p.untaxed_gold = 0;
+					}
+				}
+			}
+		}
+		else
+		{
+			// armor blocked
+			hit.offset = INT2(32,0);
+		}
+	}
+	u.waiting = 0.5f;
+	u.attack_timer = 1.f/u.base->attack_speed;
+}
+
+//=============================================================================
 bool TryMove(Unit& u, DIR new_dir, bool attack)
 {
 	u.new_pos = u.pos + dir_change[new_dir];
@@ -509,22 +584,7 @@ bool TryMove(Unit& u, DIR new_dir, bool attack)
 			{
 				// attack
 				if(u.attack_timer <= 0.f)
-				{
-					Unit& target = tile.unit->GetRef();
-					Hit& hit = Add1(hits);
-					hit.pos = target.GetPos();
-					hit.timer = 0.5f;
-					hit._ref = tile.unit;
-					u.waiting = 0.5f;
-					u.attack_timer = 1.f/u.base->attack_speed;
-					target.hp -= (u.base->attack - target.base->defense);
-					if(target.hp <= 0)
-					{
-						target.alive = false;
-						player->untaxed_gold += target.gold;
-						player->AddExp(target.base->lvl);
-					}
-				}
+					DoAttack(u, tile.unit->GetRef());
 				return true;
 			}
 			else
@@ -681,12 +741,12 @@ void DoAction(ActionId id)
 	switch(id)
 	{
 	case Action_Sleep:
-		if(player->action == PA_None && player->gold >= 10 && player->hp != player->base->hp)
+		if(player->action == PA_None && player->gold >= 10 && player->hp != player->hpmax)
 		{
 			player->gold -= 10;
 			player->action = PA_Sleep;
 			player->action_time = 0.f;
-			player->action_time_max = float((player->base->hp - player->hp)/5+1);
+			player->action_time_max = float((player->hpmax - player->hp)/5+1);
 			player->action_progress = 0.f;
 			a_actions.push_back(AAction(Action_Cancel, AS_GENERIC));
 			SortActions();
@@ -742,10 +802,19 @@ void Update(float dt)
 {
 	// selecting unit
 	INT2 tile((cursor_pos.x + cam_pos.x)/32, (cursor_pos.y + cam_pos.y)/32);
-	if(tile.x >= 0 && tile.y >= 0 && tile.x < MAP_W && tile.y < MAP_W && MousePressedRelease(1))
+	if(tile.x >= 0 && tile.y >= 0 && tile.x < MAP_W && tile.y < MAP_H && MousePressedRelease(1))
 	{
 		Tile& t = mapa[tile.x+tile.y*MAP_W];
-		selected = t.unit;
+		if(t.building)
+		{
+			selected = NULL;
+			selected_building = t.building;
+		}
+		else
+		{
+			selected = t.unit;
+			selected_building = NULL;
+		}
 	}
 
 	// sleep button
@@ -779,8 +848,8 @@ void Update(float dt)
 				{
 					player->hp += 5;
 					player->action_progress -= 1.f;
-					if(player->hp >= player->base->hp)
-						player->hp = player->base->hp;
+					if(player->hp >= player->hpmax)
+						player->hp = player->hpmax;
 				}
 				break;
 			}
@@ -790,9 +859,9 @@ void Update(float dt)
 			{
 				if(player->action == PA_DrinkPotion)
 				{
-					player->hp += 50;
-					if(player->hp >= player->base->hp)
-						player->hp = player->base->hp;
+					player->hp += 30;
+					if(player->hp >= player->hpmax)
+						player->hp = player->hpmax;
 					--player->potions;
 					if(player->potions == 0)
 						RemoveAction(Action_DrinkPotion);
@@ -886,22 +955,7 @@ void Update(float dt)
 				{
 					// in attack range
 					if(u.attack_timer <= 0.f)
-					{
-						Hit& hit = Add1(hits);
-						hit.pos = player->GetPos();
-						hit.timer = 0.5f;
-						hit._ref = player->_ref;
-						u.waiting = 0.5f;
-						u.attack_timer = 1.f/u.base->attack_speed;
-						player->hp -= u.base->attack - player->base->defense;
-						if(player->hp <= 0)
-						{
-							player->alive = false;
-							u.gold += (player->gold + player->untaxed_gold);
-							player->gold = 0;
-							player->untaxed_gold = 0;
-						}
-					}
+						DoAttack(u, *player);
 				}
 				else
 				{
