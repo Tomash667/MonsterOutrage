@@ -1,10 +1,6 @@
 + pathfinding
-+ healing depends on max hp
-+ exp for attacking
 + more realistic map
-+ button shortcut
 + text about getting gold/exp
-+ required experience like in majesty
 + ai idle walking
 
 NEXT VERSION [v2]:
@@ -16,6 +12,7 @@ NEXT VERSION [v2]:
 + marketplace lvl 2 [ring of protection]
 + better calculate experience while gaining level
 + ai patrol
++ text why can't use action (full hp, doing something, not enought gold)
 
 NEXT VERSION [v3]:
 + building damage, repair
@@ -27,6 +24,7 @@ NEXT VERSION [v3]:
 + putting reward on monsters, buildings
 + buildings [castle, house]
 + ai guard buildings, repair buildings, collect tax
++ sharing gold/experience
 
 NEXT VERSION: [v4]
 + ranged combat

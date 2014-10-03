@@ -17,6 +17,7 @@ struct Action
 	ActionId id;
 	int priority;
 	INT2 offset;
+	SDL_Scancode key;
 };
 
 enum ActionSource

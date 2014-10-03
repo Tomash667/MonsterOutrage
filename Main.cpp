@@ -559,6 +559,11 @@ void DoAttack(Unit& u, Unit& target)
 		int dmg = u.CalculateDamage() - target.RandomArmor();
 		if(dmg > 0)
 		{
+			if(u.is_player)
+			{
+				int exp_dmg = min(dmg, target.hp);
+				player->ExpForDmg(target, exp_dmg);
+			}
 			hit.offset = INT2(0,0);
 			target.hp -= dmg;
 			if(target.hp <= 0)
@@ -568,7 +573,7 @@ void DoAttack(Unit& u, Unit& target)
 				{
 					Player& p = (Player&)u;
 					p.untaxed_gold += target.gold;
-					player->AddExp(target.base->lvl);
+					player->ExpForKill(target.base->lvl);
 				}
 				else
 				{
@@ -870,6 +875,11 @@ void Update(float dt)
 			{
 				if(MousePressedRelease(1))
 					DoAction(it->id);
+				break;
+			}
+			else if(KeyPressedRelease(actions[it->id].key))
+			{
+				DoAction(it->id);
 				break;
 			}
 			pt.x += 16;

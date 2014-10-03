@@ -22,7 +22,7 @@ struct Player : public Unit
 	float action_progress, action_time, action_time_max;
 	PlayerAction action;
 
-	Player() : Unit(&base_units[0]), exp(0), untaxed_gold(0), lvl(1), need_exp(100), potions(2), action(PA_None)
+	Player() : Unit(&base_units[0]), exp(0), untaxed_gold(0), lvl(1), need_exp(1000), potions(2), action(PA_None)
 	{
 		gold = 100;
 		is_player = true;
@@ -41,37 +41,9 @@ struct Player : public Unit
 		return int(action_time/action_time_max*100);
 	}
 
-	inline void AddExp(int exp_lvl)
+	inline void AddExp(int count)
 	{
-		if(exp_lvl > lvl)
-			exp_lvl += (exp_lvl-lvl);
-		else if(exp_lvl < lvl)
-			exp_lvl -= (lvl-exp_lvl);
-		if(exp_lvl > 0)
-			exp += exp_lvl*50;
-		else
-		{
-			switch(exp_lvl)
-			{
-			case 0:
-				exp += 25;
-				break;
-			case -1:
-				exp += 12;
-				break;
-			case -2:
-				exp += 6;
-				break;
-			case -3:
-				exp += 3;
-				break;
-			case -4:
-				++exp;
-				break;
-			default:
-				return;
-			}
-		}
+		exp += count;
 		while(exp >= need_exp)
 		{
 			exp -= need_exp;
@@ -79,11 +51,57 @@ struct Player : public Unit
 			++parry;
 			if(lvl%2 == 0)
 				++strength;
-			need_exp += 100;
 			int gain = vitality/2;
 			hp += gain;
 			hpmax += gain;
 			++lvl;
 		}
+	}
+
+	inline int ExpFor(int exp_lvl)
+	{
+		if(exp_lvl > lvl)
+			exp_lvl += (exp_lvl-lvl);
+		else if(exp_lvl < lvl)
+			exp_lvl -= (lvl-exp_lvl);
+		if(exp_lvl > 0)
+			return exp_lvl*150;
+		else
+		{
+			switch(exp_lvl)
+			{
+			case 0:
+				return 75;
+			case -1:
+				return 37;
+				break;
+			case -2:
+				return 18;
+			case -3:
+				return 9;
+			case -4:
+				return 4;
+			case -5:
+				return 2;
+			case -6:
+				return 1;
+			default:
+				return 0;
+			}
+		}
+	}
+
+	inline void ExpForKill(int exp_lvl)
+	{
+		int count = ExpFor(exp_lvl);
+		if(count)
+			AddExp(count);
+	}
+
+	inline void ExpForDmg(const Unit& target, int dmg)
+	{
+		int count = ExpFor(target.base->lvl)*dmg/target.hpmax;
+		if(count)
+			AddExp(count);
 	}
 };
